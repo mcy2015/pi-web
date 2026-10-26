@@ -106,3 +106,11 @@ export async function sendMessage(
 export async function sendChatAction(token: string, chatId: number, action = "typing"): Promise<void> {
   await call(token, "sendChatAction", { chat_id: chatId, action });
 }
+
+/** Registers the chat's command menu (the "/" button's entries). */
+export async function setMyCommands(
+  token: string,
+  commands: { command: string; description: string }[],
+): Promise<void> {
+  await call(token, "setMyCommands", { commands });
+}

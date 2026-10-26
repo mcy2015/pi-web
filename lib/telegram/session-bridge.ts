@@ -3,20 +3,51 @@
 // swaps in a fresh session. The binding outlives the server: it is persisted
 // in the telegram state store, and the wrapper registry keeps the process's
 // AgentSession alive between messages.
+//
+// Turn lifecycle mirrors pi's queue: a prompt sent while a run is active is
+// accepted and queued as a follow-up, so the polling loop never blocks on a
+// run. Only the short session-open/bind/send-acceptance phase is serialized
+// per chat (two rapid messages must not race each other into two sessions);
+// the wait for the turn's end happens outside that gate.
 
 import { randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
 import { getRpcSession, startRpcSession } from "@/lib/rpc-manager";
 import { defaultCwdPath } from "@/lib/default-cwd";
-import { mkdirSync } from "node:fs";
 import { editTelegramState, readTelegramState, type TelegramConfig, type TelegramRuntimeState } from "./config-store";
 import { agentMessageText } from "./message-text";
 
-interface RunOutcome {
+export interface RunOutcome {
   /** The reply text to send back; empty when the turn produced no text. */
   reply: string;
   /** An internal failure the chat should see as an error notice. */
   error: string | null;
   sessionId: string | null;
+  /** The turn was aborted (Stop) rather than finished on its own. */
+  aborted: boolean;
+}
+
+// The per-chat setup gate. Module state is fine: a hot reload simply resets
+// it, at worst letting two setups race once.
+const chatGates = new Map<string, Promise<void>>();
+
+async function withChatGate<T>(chatId: number, operation: () => Promise<T>): Promise<T> {
+  const key = String(chatId);
+  const previous = chatGates.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const tail = previous.then(() => gate);
+  chatGates.set(key, tail);
+  tail.catch(() => {}).then(() => {
+    // The settled tail is no longer a barrier; drop it so the map stays small.
+    if (chatGates.get(key) === tail) chatGates.delete(key);
+  });
+  await previous.catch(() => {});
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
 }
 
 async function resolveCwd(config: TelegramConfig): Promise<string | null> {
@@ -83,9 +114,11 @@ async function bindChat(chatId: number, sessionId: string, sessionFile: string):
 }
 
 /**
- * Sends `text` as the chat's next turn and returns the final assistant text.
- * `onTyping` fires periodically while the turn runs (the runtime keeps the
- * chat's "typing…" indicator alive through it).
+ * Sends `text` as the chat's next turn and resolves when the turn ends: with
+ * the final assistant text, an error notice, or an abort. A prompt sent while
+ * an earlier run is still active is queued by pi as a follow-up turn, so this
+ * resolves only after that queued turn has run. `onTyping` fires periodically
+ * meanwhile (the runtime keeps the chat's "typing…" indicator alive).
  */
 export async function runChatTurn(
   chatId: number,
@@ -93,59 +126,105 @@ export async function runChatTurn(
   config: TelegramConfig,
   onTyping: () => Promise<void>,
 ): Promise<RunOutcome> {
-  const opened = await openBoundSession(readTelegramState(), chatId, config);
-  if ("error" in opened) return { reply: "", error: opened.error, sessionId: null };
-  const { sessionId, sessionFile, kind } = opened;
-  if (kind === "new") await bindChat(chatId, sessionId, sessionFile);
+  // Phase 1, inside the chat's gate: open/bind the session, subscribe, and
+  // hand the prompt to pi (acceptance; a queued prompt returns here while the
+  // earlier run continues).
+  let armed: {
+    wrapper: NonNullable<ReturnType<typeof getRpcSession>>;
+    sessionId: string;
+    awaitDone: Promise<{ reply: string; aborted: boolean }>;
+    lastText: () => string;
+  };
+  try {
+    armed = await withChatGate(chatId, async () => {
+      const opened = await openBoundSession(readTelegramState(), chatId, config);
+      if ("error" in opened) throw new TurnError(opened.error);
+      const { sessionId, sessionFile, kind } = opened;
+      if (kind === "new") await bindChat(chatId, sessionId, sessionFile);
 
-  const wrapper = getRpcSession(sessionId);
-  if (!wrapper || !wrapper.isAlive()) {
-    return { reply: "", error: "The session is no longer running; send the message again.", sessionId };
+      const wrapper = getRpcSession(sessionId);
+      if (!wrapper || !wrapper.isAlive()) {
+        throw new TurnError("The session is no longer running; send the message again.");
+      }
+
+      let lastAssistantText = "";
+      let aborted = false;
+      let settleDone!: () => void;
+      let settleFailed!: (error: Error) => void;
+      const done = new Promise<void>((resolve, reject) => {
+        settleDone = resolve;
+        settleFailed = reject;
+      });
+      const unsubscribe = wrapper.onEvent((event) => {
+        if (event.type === "message_end") {
+          const message = (event as { message?: { role?: string; content?: unknown } }).message;
+          if (message && message.role === "assistant") {
+            const extracted = agentMessageText(message as { role: string; content: unknown });
+            if (extracted.trim() !== "") lastAssistantText = extracted;
+          }
+        } else if (event.type === "prompt_done") {
+          if ((event as { aborted?: boolean }).aborted) aborted = true;
+          settleDone();
+        } else if (event.type === "prompt_error") {
+          settleFailed(new Error((event as { errorMessage?: string }).errorMessage ?? "The turn failed"));
+        }
+      });
+
+      const turn = {
+        wrapper,
+        sessionId,
+        awaitDone: (async () => {
+          try {
+            await wrapper.send({ type: "prompt", message: text });
+            await done;
+            return { reply: lastAssistantText, aborted } as const;
+          } finally {
+            unsubscribe();
+          }
+        })(),
+        lastText: () => lastAssistantText,
+      };
+      return turn;
+    });
+  } catch (error) {
+    if (error instanceof TurnError) {
+      return { reply: "", error: error.message, sessionId: null, aborted: false };
+    }
+    return { reply: "", error: `The turn failed: ${error instanceof Error ? error.message : String(error)}`, sessionId: null, aborted: false };
   }
 
-  let lastAssistantText = "";
-  // send() only acknowledges acceptance (pi's RPC contract acknowledges a
-  // prompt once validation and preflight take it); the turn's real end is
-  // the prompt_done event, prompt_error for a failure after acceptance.
-  let settleDone!: () => void;
-  let settleFailed!: (error: Error) => void;
-  const done = new Promise<void>((resolve, reject) => {
-    settleDone = resolve;
-    settleFailed = reject;
-  });
-  const unsubscribe = wrapper.onEvent((event) => {
-    if (event.type === "message_end") {
-      const message = (event as { message?: { role?: string; content?: unknown } }).message;
-      if (message && message.role === "assistant") {
-        const extracted = agentMessageText(message as { role: string; content: unknown });
-        if (extracted.trim() !== "") lastAssistantText = extracted;
-      }
-    } else if (event.type === "prompt_done") {
-      settleDone();
-    } else if (event.type === "prompt_error") {
-      settleFailed(new Error((event as { errorMessage?: string }).errorMessage ?? "The turn failed"));
-    }
-  });
-
+  // Phase 2, outside the gate: the typing heartbeat and the wait for pi's
+  // prompt_done (or prompt_error) for this turn.
   const typingTimer = setInterval(() => {
     void onTyping().catch(() => {});
   }, 5_000);
   try {
-    await wrapper.send({ type: "prompt", message: text });
-    await done;
-    return { reply: lastAssistantText, error: null, sessionId };
+    const settled = await armed.awaitDone;
+    return { reply: settled.reply, error: null, sessionId: armed.sessionId, aborted: settled.aborted };
   } catch (error) {
-    return { reply: "", error: `The turn failed: ${error instanceof Error ? error.message : String(error)}`, sessionId };
+    const partial = armed.lastText();
+    return { reply: partial, error: `The turn failed: ${error instanceof Error ? error.message : String(error)}`, sessionId: armed.sessionId, aborted: false };
   } finally {
     clearInterval(typingTimer);
-    unsubscribe();
   }
 }
 
+class TurnError extends Error {}
+
 /** Starts a fresh session for the chat, replacing any earlier binding. */
 export async function resetChatSession(chatId: number, config: TelegramConfig): Promise<RunOutcome> {
-  const opened = await openBoundSession({ ...readTelegramState(), chats: {} }, chatId, config);
-  if ("error" in opened) return { reply: "", error: opened.error, sessionId: null };
-  await bindChat(chatId, opened.sessionId, opened.sessionFile);
-  return { reply: "", error: null, sessionId: opened.sessionId };
+  try {
+    const opened = await withChatGate(chatId, async () => {
+      const result = await openBoundSession({ ...readTelegramState(), chats: {} }, chatId, config);
+      if ("error" in result) throw new TurnError(result.error);
+      await bindChat(chatId, result.sessionId, result.sessionFile);
+      return result;
+    });
+    return { reply: "", error: null, sessionId: opened.sessionId, aborted: false };
+  } catch (error) {
+    if (error instanceof TurnError) {
+      return { reply: "", error: error.message, sessionId: null, aborted: false };
+    }
+    return { reply: "", error: `Could not start a session: ${error instanceof Error ? error.message : String(error)}`, sessionId: null, aborted: false };
+  }
 }

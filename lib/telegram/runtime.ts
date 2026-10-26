@@ -9,6 +9,7 @@ import {
   getMe,
   sendMessage,
   sendChatAction,
+  setMyCommands,
   type TelegramUpdate,
 } from "./bot-api";
 import {
@@ -97,6 +98,7 @@ async function pollLoop(loop: LoopHandle, config: TelegramConfig, epoch: number)
     const me = await getMe(token);
     current.info.botUsername = me.username;
     current.info.lastError = null;
+    await registerCommands(token).catch(() => {});
   } catch (error) {
     current.info.running = false;
     current.info.lastError = error instanceof Error ? error.message : String(error);
@@ -135,6 +137,18 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** The Telegram command menu, registered once per loop start (setMyCommands). */
+const NATIVE_COMMANDS: { command: string; description: string }[] = [
+  { command: "new", description: "Start a fresh session" },
+  { command: "stop", description: "Stop the running turn" },
+  { command: "status", description: "Is a turn running?" },
+  { command: "help", description: "What this bot can do" },
+];
+
+async function registerCommands(token: string): Promise<void> {
+  await setMyCommands(token, NATIVE_COMMANDS);
+}
+
 async function persistOffset(nextOffset: number): Promise<void> {
   await editTelegramState((state) => {
     if (state.offset >= nextOffset) return { state, changed: false };
@@ -157,10 +171,40 @@ async function reply(token: string, chatId: number, text: string): Promise<void>
 }
 
 const HELP_TEXT = [
-  "Pi Web is connected. Messages run in a pi session of this chat.",
-  "/new — start a fresh session",
-  "/status — is the current turn still running?",
+  "Pi Web is connected. Messages run in this chat's pi session; you can open it in the sidebar.",
+  "/new — start a fresh session (the old one stays in the sidebar)",
+  "/stop — stop the running turn",
+  "/status — is a turn running?",
+  "A message sent while a turn runs is queued as its follow-up.",
 ].join("\n");
+
+/** The chats with a turn (or queued follow-up) still resolving, for /status. */
+const inflightTurns = new Map<number, Promise<void>>();
+
+function dispatchTurn(token: string, chatId: number, text: string): void {
+  // Not awaited: pi queues a prompt sent mid-run as a follow-up turn, so the
+  // polling loop stays free for /stop and other chats.
+  const turn = (async () => {
+    const config = readTelegramConfig();
+    const outcome = await runChatTurn(chatId, text, config, () => sendChatAction(token, chatId));
+    if (outcome.error) {
+      await reply(token, chatId, `❌ ${outcome.error}`);
+      return;
+    }
+    if (outcome.aborted) {
+      await reply(token, chatId, outcome.reply.trim() !== "" ? outcome.reply : "⏹ Stopped.");
+      return;
+    }
+    if (outcome.reply.trim() === "") {
+      await reply(token, chatId, "✅ The turn finished without a text reply.");
+      return;
+    }
+    await reply(token, chatId, outcome.reply);
+  })().finally(() => {
+    if (inflightTurns.get(chatId) === turn) inflightTurns.delete(chatId);
+  });
+  inflightTurns.set(chatId, turn);
+}
 
 async function handleUpdate(token: string, update: TelegramUpdate): Promise<void> {
   const message = update.message ?? update.edited_message;
@@ -188,27 +232,39 @@ async function handleUpdate(token: string, update: TelegramUpdate): Promise<void
   }
   if (text === "/new") {
     const outcome = await resetChatSession(chatId, config);
-    await reply(token, chatId, outcome.error ? `❌ ${outcome.error}` : "🆕 New session started.");
+    await reply(token, chatId, outcome.error ? `❌ ${outcome.error}` : "🆕 New session started. The old one stays in the sidebar.");
+    return;
+  }
+  if (text === "/stop") {
+    const binding = readTelegramState().chats[String(chatId)];
+    const wrapper = binding ? getRpcSession(binding.sessionId) : undefined;
+    if (!wrapper || !wrapper.isAlive() || !wrapper.isRunning()) {
+      await reply(token, chatId, "💤 No turn is running.");
+      return;
+    }
+    try {
+      await wrapper.send({ type: "abort" });
+      await reply(token, chatId, "⏹ Stopping…");
+    } catch (error) {
+      await reply(token, chatId, `❌ Stop failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
     return;
   }
   if (text === "/status") {
     const binding = readTelegramState().chats[String(chatId)];
-    const running = binding ? getRpcSession(binding.sessionId)?.isRunning() === true : false;
-    await reply(token, chatId, running ? "⏳ A turn is still running in this chat's session." : "💤 No turn is running.");
+    const running = inflightTurns.has(chatId)
+      || (binding ? getRpcSession(binding.sessionId)?.isRunning() === true : false);
+    const which = binding ? `Session ${binding.sessionId.slice(0, 8)} in ${running ? "a running turn" : "idle"}.` : "No session yet; send a message to start one.";
+    await reply(token, chatId, running ? `⏳ ${which} Later messages queue as follow-ups.` : `💤 ${which}`);
     return;
   }
   if (text.startsWith("/")) {
     await reply(token, chatId, "Unknown command.\n\n" + HELP_TEXT);
     return;
   }
-  const outcome = await runChatTurn(chatId, text, config, () => sendChatAction(token, chatId));
-  if (outcome.error) {
-    await reply(token, chatId, `❌ ${outcome.error}`);
-    return;
+  if (inflightTurns.has(chatId)) {
+    // The turn still resolving gets this message queued behind it by pi.
+    await sendChatAction(token, chatId).catch(() => {});
   }
-  if (outcome.reply.trim() === "") {
-    await reply(token, chatId, "✅ The turn finished without a text reply.");
-    return;
-  }
-  await reply(token, chatId, outcome.reply);
+  dispatchTurn(token, chatId, text);
 }
