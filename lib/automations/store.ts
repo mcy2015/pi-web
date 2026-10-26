@@ -14,6 +14,8 @@ import type { Schedule } from "./cron-schedule";
 const MAX_BYTES = 4 * 1024 * 1024;
 /** The run history keeps the newest N runs; older ones fall off. */
 export const RUN_HISTORY_LIMIT = 100;
+/** Per automation: enough targets for every allowlisted chat, not a mailing list. */
+const NOTIFY_CHANNEL_LIMIT = 20;
 
 const LOCK_OPTIONS = {
   realpath: false,
@@ -37,6 +39,16 @@ function errorCode(error: unknown): string | null {
     : null;
 }
 
+/** Where a finished run's outcome is announced, OpenClaw-style delivery
+ * targets; today a Telegram chat, extensible to more channel types. */
+export interface TelegramNotifyTarget {
+  type: "telegram";
+  /** A chat id, normally one of the Telegram channel's allowlisted chats. */
+  chatId: number;
+}
+
+export type NotifyChannelTarget = TelegramNotifyTarget;
+
 export interface AutomationModel {
   id: string;
   name: string;
@@ -49,6 +61,8 @@ export interface AutomationModel {
   thinkingLevel: string | null;
   /** Push a completion notification for each run. */
   notify: boolean;
+  /** Extra channels a finished run announces its outcome (and full reply) to. */
+  notifyChannels: NotifyChannelTarget[];
   /** The scheduler's cache: when this automation is next due. */
   nextDueAt: number | null;
   lastRunAt: number | null;
@@ -157,6 +171,23 @@ function parseSchedule(raw: unknown): Schedule | null {
   return null;
 }
 
+function parseNotifyChannels(raw: unknown): NotifyChannelTarget[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<number>();
+  const targets: NotifyChannelTarget[] = [];
+  for (const entry of raw) {
+    if (targets.length >= NOTIFY_CHANNEL_LIMIT) break;
+    if (typeof entry !== "object" || entry === null) continue;
+    const record = entry as Record<string, unknown>;
+    if (record.type !== "telegram") continue;
+    const chatId = record.chatId;
+    if (typeof chatId !== "number" || !Number.isInteger(chatId) || seen.has(chatId)) continue;
+    seen.add(chatId);
+    targets.push({ type: "telegram", chatId });
+  }
+  return targets;
+}
+
 function parseAutomation(raw: unknown): AutomationModel | null {
   if (typeof raw !== "object" || raw === null) return null;
   const record = raw as Record<string, unknown>;
@@ -183,6 +214,7 @@ function parseAutomation(raw: unknown): AutomationModel | null {
       : null,
     thinkingLevel: typeof record.thinkingLevel === "string" ? record.thinkingLevel : null,
     notify: record.notify !== false,
+    notifyChannels: parseNotifyChannels(record.notifyChannels),
     nextDueAt: typeof record.nextDueAt === "number" ? record.nextDueAt : null,
     lastRunAt: typeof record.lastRunAt === "number" ? record.lastRunAt : null,
     createdAt: typeof record.createdAt === "number" ? record.createdAt : 0,

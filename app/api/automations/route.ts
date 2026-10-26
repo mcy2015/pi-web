@@ -12,8 +12,10 @@ import {
   readAutomations,
   runsOf,
   type AutomationModel,
+  type NotifyChannelTarget,
 } from "@/lib/automations/store";
 import { fireAutomation, syncAutomationsRuntime } from "@/lib/automations/runner";
+import { readTelegramConfig } from "@/lib/telegram/config-store";
 
 function asSchedule(raw: unknown): Schedule | null {
   if (typeof raw !== "object" || raw === null) return null;
@@ -34,6 +36,32 @@ function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
 
+/** Notify targets off the wire: telegram targets with an integer chat id. */
+function asNotifyChannels(raw: unknown): NotifyChannelTarget[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<number>();
+  const targets: NotifyChannelTarget[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const record = entry as Record<string, unknown>;
+    if (record.type !== "telegram") continue;
+    const chatId = record.chatId;
+    if (typeof chatId !== "number" || !Number.isInteger(chatId) || seen.has(chatId)) continue;
+    seen.add(chatId);
+    targets.push({ type: "telegram", chatId });
+  }
+  return targets;
+}
+
+/** What the notify row's Telegram picklist shows: the channel's chats. */
+function telegramPicklist(): { tokenSet: boolean; chats: { id: number; title: string | null }[] } {
+  const config = readTelegramConfig();
+  return {
+    tokenSet: config.token !== "",
+    chats: config.allowedChats.map((chat) => ({ id: chat.id, title: chat.title })),
+  };
+}
+
 function validateDraft(body: Record<string, unknown>): { schedule?: Schedule; name?: string; cwd?: string; prompt?: string; problem?: string } {
   const name = asString(body.name);
   if (!name) return { problem: "A name is required." };
@@ -51,7 +79,7 @@ function validateDraft(body: Record<string, unknown>): { schedule?: Schedule; na
 export async function GET() {
   try {
     const file = readAutomations();
-    return NextResponse.json({ automations: file.automations, runs: runsOf(file) });
+    return NextResponse.json({ automations: file.automations, runs: runsOf(file), telegram: telegramPicklist() });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
@@ -91,6 +119,7 @@ export async function POST(req: NextRequest) {
             : null,
           thinkingLevel: asString(body.thinkingLevel),
           notify: body.notify !== false,
+          notifyChannels: asNotifyChannels(body.notifyChannels),
           nextDueAt: null,
           lastRunAt: null,
           createdAt: Date.now(),
@@ -114,6 +143,7 @@ export async function POST(req: NextRequest) {
           cwd: draft.cwd!,
           prompt: draft.prompt!,
           notify: body.notify !== false,
+          notifyChannels: asNotifyChannels(body.notifyChannels),
           ...(model && typeof model.provider === "string" && typeof model.modelId === "string"
             ? { model: { provider: model.provider, modelId: model.modelId } }
             : { model: null }),

@@ -3,9 +3,10 @@
 // syncAutomationsRuntime (boot and every Settings change). A fire creates an
 // isolated pi session (named "task · time"), sends the prompt, waits for the
 // turn's prompt_done — the lesson the Telegram channel paid for — records the
-// run, and pushes a completion notification. A run is skipped when the same
-// automation is still running (OpenClaw's policy); time missed while the
-// server was down is not made up: nextDueAt is recomputed from now.
+// run, pushes a browser notification, and announces the outcome (with the
+// full final reply) to the automation's notify channels. A run is skipped
+// when the same automation is still running (OpenClaw's policy); time missed
+// while the server was down is not made up: nextDueAt is recomputed from now.
 
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -15,6 +16,8 @@ import { allowFileRoot } from "@/lib/file-access";
 import { invalidateSessionListCache } from "@/lib/session-reader";
 import { editAutomations, readAutomations, type AutomationModel, type AutomationRun } from "./store";
 import { nextDueTime, scheduleProblem } from "./cron-schedule";
+import { pushRunOutcome } from "./notify";
+import { agentMessageText } from "../telegram/message-text";
 
 const TICK_MS = 30_000;
 
@@ -120,24 +123,33 @@ export async function fireAutomation(
   trigger: "schedule" | "manual",
 ): Promise<{ runId: string; sessionId: string | null; error: string | null }> {
   const runId = randomUUID();
+  const runStartedAt = Date.now();
   await recordRun({
     id: runId,
     automationId: automation.id,
     trigger,
-    startedAt: Date.now(),
+    startedAt: runStartedAt,
     finishedAt: null,
     status: "running",
     sessionId: null,
     sessionFile: null,
     error: null,
   });
-  await persistAutomationPatch(automation.id, { lastRunAt: Date.now() });
+  await persistAutomationPatch(automation.id, { lastRunAt: runStartedAt });
 
   const fail = async (error: string): Promise<{ runId: string; sessionId: null; error: string }> => {
     await finishRun(runId, { finishedAt: Date.now(), status: "failed", error });
     if (automation.notify && trigger === "schedule") {
       await notifySessionComplete(automation.id, `${automation.name} · failed`).catch(() => {});
     }
+    await pushRunOutcome(automation, {
+      status: "failed",
+      name: `${automation.name} · ${runStamp()}`,
+      reply: "",
+      error,
+      startedAt: runStartedAt,
+      durationMs: Date.now() - runStartedAt,
+    }).catch(() => {});
     return { runId, sessionId: null, error };
   };
 
@@ -170,6 +182,7 @@ export async function fireAutomation(
   }
 
   let aborted = false;
+  let lastAssistantText = "";
   let settleDone!: () => void;
   let settleFailed!: (error: Error) => void;
   const done = new Promise<void>((resolve, reject) => {
@@ -177,7 +190,13 @@ export async function fireAutomation(
     settleFailed = reject;
   });
   const unsubscribe = wrapper.onEvent((event) => {
-    if (event.type === "prompt_done") {
+    if (event.type === "message_end") {
+      const message = (event as { message?: { role?: string; content?: unknown } }).message;
+      if (message && message.role === "assistant") {
+        const extracted = agentMessageText(message as { role: string; content: unknown });
+        if (extracted.trim() !== "") lastAssistantText = extracted;
+      }
+    } else if (event.type === "prompt_done") {
       if ((event as { aborted?: boolean }).aborted) aborted = true;
       settleDone();
     } else if (event.type === "prompt_error") {
@@ -199,6 +218,14 @@ export async function fireAutomation(
     if (automation.notify) {
       await notifySessionComplete(sessionId, name).catch(() => {});
     }
+    await pushRunOutcome(automation, {
+      status: aborted ? "skipped" : "done",
+      name,
+      reply: lastAssistantText,
+      error: aborted ? "The turn was stopped" : null,
+      startedAt: runStartedAt,
+      durationMs: Date.now() - runStartedAt,
+    }).catch(() => {});
     return { runId, sessionId, error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -213,6 +240,14 @@ export async function fireAutomation(
     if (automation.notify) {
       await notifySessionComplete(sessionId, `${name} · failed`).catch(() => {});
     }
+    await pushRunOutcome(automation, {
+      status: "failed",
+      name,
+      reply: lastAssistantText,
+      error: message,
+      startedAt: runStartedAt,
+      durationMs: Date.now() - runStartedAt,
+    }).catch(() => {});
     return { runId, sessionId, error: message };
   } finally {
     unsubscribe();

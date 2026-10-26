@@ -42,6 +42,16 @@ import {
 
 type ScheduleKind = "cron" | "at" | "every";
 
+interface NotifyChannelDraft {
+  type: "telegram";
+  chatId: number;
+}
+
+interface TelegramPicklist {
+  tokenSet: boolean;
+  chats: { id: number; title: string | null }[];
+}
+
 interface Draft {
   name: string;
   kind: ScheduleKind;
@@ -53,6 +63,7 @@ interface Draft {
   cwd: string;
   prompt: string;
   notify: boolean;
+  notifyChannels: NotifyChannelDraft[];
 }
 
 const EVERY_UNIT_MS: Record<Draft["everyUnit"], number> = {
@@ -95,6 +106,7 @@ function draftFrom(automation: AutomationModel | null): Draft {
       cwd: "",
       prompt: "",
       notify: true,
+      notifyChannels: [],
     };
   }
   const schedule = automation.schedule;
@@ -112,6 +124,8 @@ function draftFrom(automation: AutomationModel | null): Draft {
     cwd: automation.cwd,
     prompt: automation.prompt,
     notify: automation.notify,
+    notifyChannels: automation.notifyChannels.flatMap((target): NotifyChannelDraft[] =>
+      target.type === "telegram" && Number.isInteger(target.chatId) ? [{ type: "telegram", chatId: target.chatId }] : []),
   };
 }
 
@@ -139,6 +153,7 @@ export function AutomationsConfig({ embedded = true, onClose }: { embedded?: boo
   const { t } = useI18n();
   const [automations, setAutomations] = useState<AutomationModel[] | null>(null);
   const [runs, setRuns] = useState<AutomationRun[]>([]);
+  const [telegram, setTelegram] = useState<TelegramPicklist | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(() => draftFrom(null));
   const [preview, setPreview] = useState<{ dueAt: number | null; problem: string | null } | null>(null);
@@ -149,10 +164,16 @@ export function AutomationsConfig({ embedded = true, onClose }: { embedded?: boo
   const reload = useCallback(async () => {
     try {
       const res = await fetch("/api/automations", { cache: "no-store" });
-      const payload = await res.json() as { automations?: AutomationModel[]; runs?: AutomationRun[]; error?: string };
+      const payload = await res.json() as {
+        automations?: AutomationModel[];
+        runs?: AutomationRun[];
+        telegram?: TelegramPicklist;
+        error?: string;
+      };
       if (!res.ok || payload.error) return;
       setAutomations(payload.automations ?? []);
       setRuns(payload.runs ?? []);
+      if (payload.telegram) setTelegram(payload.telegram);
     } catch {
       // The next poll retries.
     }
@@ -405,11 +426,37 @@ export function AutomationsConfig({ embedded = true, onClose }: { embedded?: boo
                     />
                   </ConfigDetailGridRow>
                   <ConfigDetailGridRow label={t("automations.notifyLabel")}>
-                    <ConfigSwitch
-                      checked={draft.notify}
-                      label={t("automations.notifyLabel")}
-                      onChange={(notify) => setDraft((current) => ({ ...current, notify }))}
-                    />
+                    <div className="automations-notify">
+                      <div className="automations-notify-row">
+                        <ConfigSwitch
+                          checked={draft.notify}
+                          label={t("automations.notifyBrowser")}
+                          onChange={(notify) => setDraft((current) => ({ ...current, notify }))}
+                        />
+                        <span>{t("automations.notifyBrowser")}</span>
+                      </div>
+                      {telegram !== null && telegram.chats.map((chat) => {
+                        const checked = draft.notifyChannels.some((target) => target.chatId === chat.id);
+                        return (
+                          <label key={chat.id} className="automations-notify-row">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(event) => setDraft((current) => ({
+                                ...current,
+                                notifyChannels: event.target.checked
+                                  ? [...current.notifyChannels, { type: "telegram" as const, chatId: chat.id }]
+                                  : current.notifyChannels.filter((target) => target.chatId !== chat.id),
+                              }))}
+                            />
+                            <span>{chat.title !== null && chat.title.trim() !== "" ? chat.title : `Telegram · ${chat.id}`}</span>
+                          </label>
+                        );
+                      })}
+                      {telegram !== null && telegram.chats.length === 0 && (
+                        <div className="automations-notify-hint">{t("automations.notifyTelegramHint")}</div>
+                      )}
+                    </div>
                   </ConfigDetailGridRow>
                 </ConfigDetailGrid>
 
@@ -438,6 +485,7 @@ export function AutomationsConfig({ embedded = true, onClose }: { embedded?: boo
                         cwd: draft.cwd.trim(),
                         prompt: draft.prompt,
                         notify: draft.notify,
+                        notifyChannels: draft.notifyChannels,
                       };
                       void run("save", body, editing ? t("automations.saved") : t("automations.created")).then((ok) => {
                         if (!ok) return;

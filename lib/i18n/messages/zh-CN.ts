@@ -98,6 +98,8 @@ export const zhCNLocale: LocalePlugin = {
     "automations.cwdLabel": "工作目录",
     "automations.promptLabel": "提示词",
     "automations.notifyLabel": "运行结束推送通知",
+    "automations.notifyBrowser": "浏览器推送",
+    "automations.notifyTelegramHint": "要把运行结果推送到 Telegram，请先在 设置 › 频道 里允许一个聊天。",
     "automations.enabledLabel": "启用任务",
     "automations.disclosure": "每次运行会在上面的工作目录里启动一个拥有完整工具权限的 agent 会话，并按原文执行提示词——与你亲自发送完全一样。",
     "automations.create": "创建任务",
