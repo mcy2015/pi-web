@@ -1,5 +1,6 @@
 import { configureHttpDispatcher, readHttpIdleTimeoutMs } from "@/lib/http-dispatcher";
 import { closeAllAgentEventStreams } from "@/lib/agent-event-stream";
+import { syncTelegramRuntime } from "@/lib/telegram/runtime";
 
 export function registerNodeInstrumentation(): void {
   // The pi CLI applies settings' `httpIdleTimeoutMs` to the same undici
@@ -21,4 +22,11 @@ export function registerNodeInstrumentation(): void {
   // it overlaps the browser opening, and the routes reuse Node's cached module.
   // A failure is left for the routes' own import to report.
   import("@earendil-works/pi-coding-agent").catch(() => {});
+
+  // The Telegram channel's polling loop starts with the server when a token
+  // is configured and enabled. Settings changes restart it through
+  // syncTelegramRuntime; this boot call only has to fire once.
+  void syncTelegramRuntime().catch((error) => {
+    console.warn(`[pi-web] starting the telegram runtime failed: ${error instanceof Error ? error.message : String(error)}`);
+  });
 }
