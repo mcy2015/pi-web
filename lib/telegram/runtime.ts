@@ -94,12 +94,16 @@ export async function syncTelegramRuntime(): Promise<void> {
 async function pollLoop(loop: LoopHandle, config: TelegramConfig, epoch: number): Promise<void> {
   const current = runtime();
   const token = config.token;
+  console.log(`[pi-web] telegram loop #${epoch} starting`);
   try {
     const me = await getMe(token);
+    console.log(`[pi-web] telegram loop #${epoch}: getMe ok (@${me.username})`);
     current.info.botUsername = me.username;
     current.info.lastError = null;
     await registerCommands(token).catch(() => {});
+    console.log(`[pi-web] telegram loop #${epoch}: commands registered`);
   } catch (error) {
+    console.warn(`[pi-web] telegram loop #${epoch}: startup failed: ${error instanceof Error ? error.message : String(error)}`);
     current.info.running = false;
     current.info.lastError = error instanceof Error ? error.message : String(error);
     if (current.loop === loop) current.loop = null;
@@ -127,6 +131,7 @@ async function pollLoop(loop: LoopHandle, config: TelegramConfig, epoch: number)
       await handleUpdate(token, update);
     }
   }
+  console.log(`[pi-web] telegram loop #${epoch}: exited (cancelled=${loop.cancelled}, epoch=${runtime().configEpoch})`);
   if (current.loop === loop) {
     current.loop = null;
     current.info.running = false;
