@@ -95,7 +95,7 @@ app/api/
   skills/search/route.ts           POST skills.sh search
   subagents/settings/route.ts      GET/PUT built-in subagent switch and maxConcurrent
   web-auth/route.ts                GET status | POST login | DELETE logout (browser password)
-  telegram/route.ts                GET the channel's status (token as a last-4 hint) | POST set/remove token, enable, default cwd, allow/remove chat, test send (lib/telegram/*)
+  channels/route.ts                GET the Channels status (token as a last-4 hint) | POST set/remove token, enable, default cwd, allow/remove chat, test send (lib/telegram/*)
   provider-usage/query/route.ts    POST provider usage quotas
   push/config/route.ts             GET VAPID public key
   push/subscribe/route.ts          POST register a push subscription
@@ -105,7 +105,7 @@ lib/
   share-store.ts             pi-web-shares.json: one share per session, locked atomic writes, corrupt file set aside
   share-snapshot.ts          the frozen projection a share serves: active branch, inline media, 25 MB cap
   share-types.ts             client-safe share types and the share-code pattern
-  telegram/                  the Telegram channel: bot-api (fetch Bot API client), config-store (pi-web-telegram.json + state, locked atomic writes), message-text (4096 chunking), session-bridge (chat↔pi session), runtime (long-poll singleton restarted with the config)
+  telegram/                  the Telegram channel: bot-api (fetch Bot API client), config-store (pi-web-channels.json + state, one section per channel, locked atomic writes, legacy pi-web-telegram.json migrated once), message-text (4096 chunking), session-bridge (chat↔pi session), runtime (long-poll singleton restarted with the config)
   agent-client.ts           typed fetch helper for /api/agent commands
   rpc-manager.ts            AgentSessionWrapper, registry, startRpcSession
   session-reader.ts         SessionManager wrappers, path cache, buildSessionContext adapter
@@ -191,7 +191,7 @@ lib/
   mcp-tool-display.ts       server/tool label of an mcp__ call from its result details, never the name
 
 components/
-  TelegramConfig.tsx            Settings › Telegram: token (write-only, last-4 hint), enable switch, default cwd, chat allowlist with one-click pairing
+  ChannelsConfig.tsx            Settings › Channels: the shared split view; Telegram's pane: token (write-only, last-4 hint), enable switch, default cwd, chat allowlist with one-click pairing
   SharePanel.tsx             session row's Share menu body: disclosure, link, copy/refresh/stop
   SharedSessionView.tsx      the public /share/<code> page's read-only view (MessageView reused, passive props only)
   AppShell.tsx             layout, URL state, tab management

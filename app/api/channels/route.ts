@@ -1,9 +1,10 @@
-// GET  /api/telegram  — the channel's status for Settings › Telegram: the
-//                       config (token only as a last-4 hint), the loop's
-//                       health, and the last unknown chat for pairing.
-// POST /api/telegram  — config changes and one-off actions, each restarting
+// GET  /api/channels  — the Channels settings' status: the Telegram
+//                       section's config (token only as a last-4 hint), the
+//                       loop's health, and the last unknown chat for pairing.
+// POST /api/channels  — config changes and one-off actions, each restarting
 //                       the loop to match. The token is accepted here and
-//                       never echoed back whole.
+//                       never echoed back whole. More channels follow the
+//                       same sectioned store (lib/telegram/config-store.ts).
 
 import { NextResponse, type NextRequest } from "next/server";
 import { getMe, sendMessage } from "@/lib/telegram/bot-api";

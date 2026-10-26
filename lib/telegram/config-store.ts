@@ -1,12 +1,14 @@
-// pi-web-telegram.json: the Telegram channel's user config (token, enabled,
-// default cwd, allowlisted chats) and pi-web-telegram-state.json: the runtime
-// state (poll offset, chat→session bindings, the last unknown chat for the
+// pi-web-channels.json: the Channels settings' user config — one section per
+// channel (today only Telegram: token, enabled, default cwd, allowlisted
+// chats) — and pi-web-channels-state.json: the channels' runtime state (the
+// Telegram poll offset, chat→session bindings, the last unknown chat for the
 // pairing UI). Both follow the session UI state's rules: writes serialized
 // per process, locked against others, replaced atomically, and a file that
 // cannot be parsed is set aside, never overwritten. The config file holds
 // the bot token, so it is created with owner-only permissions.
+// A pre-channels pi-web-telegram.json (or -state.json) is migrated once.
 
-import { chmodSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import lockfile from "proper-lockfile";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -21,12 +23,12 @@ const LOCK_OPTIONS = {
   stale: 10_000,
   retries: { retries: 10, factor: 2, minTimeout: 25, maxTimeout: 500 },
   onCompromised: (error: Error) => {
-    console.warn(`[pi-web] the telegram store lock was compromised: ${error.message}`);
+    console.warn(`[pi-web] the channels store lock was compromised: ${error.message}`);
   },
 };
 
 export class TelegramStoreLockedError extends Error {
-  constructor(message = "Another process holds the telegram store lock") {
+  constructor(message = "Another process holds the channels store lock") {
     super(message);
     this.name = "TelegramStoreLockedError";
   }
@@ -63,12 +65,21 @@ export interface TelegramRuntimeState {
 export const EMPTY_CONFIG: TelegramConfig = { token: "", enabled: false, defaultCwd: null, allowedChats: [] };
 export const EMPTY_STATE: TelegramRuntimeState = { offset: 0, chats: {}, lastUnknownChat: null };
 
-export function telegramConfigPath(agentDir = getAgentDir()): string {
-  return `${agentDir}/pi-web-telegram.json`;
+export function channelsConfigPath(agentDir = getAgentDir()): string {
+  return `${agentDir}/pi-web-channels.json`;
 }
 
-export function telegramStatePath(agentDir = getAgentDir()): string {
-  return `${agentDir}/pi-web-telegram-state.json`;
+export function channelsStatePath(agentDir = getAgentDir()): string {
+  return `${agentDir}/pi-web-channels-state.json`;
+}
+
+/** The pre-channels flat files, migrated once into the sections above. */
+function legacyConfigPath(path: string): string {
+  return path.replace(/pi-web-channels\.json$/, "pi-web-telegram.json");
+}
+
+function legacyStatePath(path: string): string {
+  return path.replace(/pi-web-channels-state\.json$/, "pi-web-telegram-state.json");
 }
 
 function setAside(path: string): void {
@@ -101,6 +112,34 @@ function writeJsonAtomic(path: string, value: unknown): void {
   // so an existing world-readable file is tightened here too.
   chmodSync(temp, 0o600);
   renameSync(temp, path);
+}
+
+function fileExists(path: string): boolean {
+  return existsSync(path);
+}
+
+/**
+ * The one-time move from the pre-channels flat files: the legacy telegram
+ * values become the "telegram" section of the channels file, and the legacy
+ * file is renamed aside so the migration never runs twice.
+ */
+function migrateLegacy(legacyPath: string, newPath: string): void {
+  if (!fileExists(legacyPath) || fileExists(newPath)) return;
+  const legacy = readJson(legacyPath);
+  if (legacy === null) return;
+  const section = legacy.telegram && typeof legacy.telegram === "object"
+    ? (legacy.telegram as Record<string, unknown>)
+    : legacy;
+  const existing = readJson(newPath);
+  const next: Record<string, unknown> = { ...(existing ?? {}) };
+  if (next.telegram === undefined) next.telegram = section;
+  try {
+    writeJsonAtomic(newPath, next);
+    renameSync(legacyPath, `${legacyPath}.migrated-${Date.now()}`);
+    console.warn(`[pi-web] migrated ${legacyPath} into ${newPath}`);
+  } catch (error) {
+    console.warn(`[pi-web] migrating ${legacyPath} into ${newPath} failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 async function editFile<T>(
@@ -136,12 +175,13 @@ async function editFile<T>(
 const CONFIG_QUEUE: symbol = Symbol.for("pi-web:telegram-config-queue");
 const STATE_QUEUE: symbol = Symbol.for("pi-web:telegram-state-queue");
 
-export function parseConfig(raw: Record<string, unknown> | null): TelegramConfig {
-  if (raw === null) return { ...EMPTY_CONFIG };
-  const token = typeof raw.token === "string" ? raw.token.trim() : "";
-  const defaultCwd = typeof raw.defaultCwd === "string" && raw.defaultCwd.trim() !== "" ? raw.defaultCwd : null;
-  const allowedChats: TelegramAllowedChat[] = Array.isArray(raw.allowedChats)
-    ? raw.allowedChats.flatMap((entry): TelegramAllowedChat[] => {
+export function parseTelegramConfig(raw: unknown): TelegramConfig {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return { ...EMPTY_CONFIG };
+  const record = raw as Record<string, unknown>;
+  const token = typeof record.token === "string" ? record.token.trim() : "";
+  const defaultCwd = typeof record.defaultCwd === "string" && record.defaultCwd.trim() !== "" ? record.defaultCwd : null;
+  const allowedChats: TelegramAllowedChat[] = Array.isArray(record.allowedChats)
+    ? record.allowedChats.flatMap((entry): TelegramAllowedChat[] => {
         if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return [];
         const id = (entry as { id?: unknown }).id;
         const title = (entry as { title?: unknown }).title;
@@ -149,20 +189,23 @@ export function parseConfig(raw: Record<string, unknown> | null): TelegramConfig
         return [{ id, title: typeof title === "string" && title.trim() !== "" ? title : null }];
       })
     : [];
-  return { token, enabled: raw.enabled === true, defaultCwd, allowedChats };
+  return { token, enabled: record.enabled === true, defaultCwd, allowedChats };
 }
 
-export function readTelegramConfig(path = telegramConfigPath()): TelegramConfig {
-  return parseConfig(readJson(path));
-}
-
-export function readTelegramState(path = telegramStatePath()): TelegramRuntimeState {
+export function readTelegramConfig(path = channelsConfigPath()): TelegramConfig {
+  migrateLegacy(legacyConfigPath(path), path);
   const raw = readJson(path);
-  if (raw === null) return { ...EMPTY_STATE, chats: {} };
-  const offset = typeof raw.offset === "number" && Number.isInteger(raw.offset) && raw.offset >= 0 ? raw.offset : 0;
+  if (raw === null) return { ...EMPTY_CONFIG };
+  return parseTelegramConfig(raw.telegram);
+}
+
+export function parseTelegramState(raw: unknown): TelegramRuntimeState {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return { ...EMPTY_STATE, chats: {} };
+  const record = raw as Record<string, unknown>;
+  const offset = typeof record.offset === "number" && Number.isInteger(record.offset) && record.offset >= 0 ? record.offset : 0;
   const chats: Record<string, TelegramChatBinding> = {};
-  if (typeof raw.chats === "object" && raw.chats !== null && !Array.isArray(raw.chats)) {
-    for (const [key, value] of Object.entries(raw.chats)) {
+  if (typeof record.chats === "object" && record.chats !== null && !Array.isArray(record.chats)) {
+    for (const [key, value] of Object.entries(record.chats)) {
       if (!/^-?\d+$/.test(key) || typeof value !== "object" || value === null) continue;
       const sessionId = (value as { sessionId?: unknown }).sessionId;
       const sessionFile = (value as { sessionFile?: unknown }).sessionFile;
@@ -171,7 +214,7 @@ export function readTelegramState(path = telegramStatePath()): TelegramRuntimeSt
       }
     }
   }
-  const unknownRaw = raw.lastUnknownChat;
+  const unknownRaw = record.lastUnknownChat;
   const lastUnknownChat = typeof unknownRaw === "object" && unknownRaw !== null
     && typeof (unknownRaw as { id?: unknown }).id === "number"
     ? {
@@ -183,29 +226,38 @@ export function readTelegramState(path = telegramStatePath()): TelegramRuntimeSt
   return { offset, chats, lastUnknownChat };
 }
 
-/** Read-modify-write the config under the lock. */
+export function readTelegramState(path = channelsStatePath()): TelegramRuntimeState {
+  migrateLegacy(legacyStatePath(path), path);
+  const raw = readJson(path);
+  if (raw === null) return { ...EMPTY_STATE, chats: {} };
+  return parseTelegramState(raw.telegram);
+}
+
+/** Read-modify-write the Telegram section under the lock. */
 export function editTelegramConfig(
   edit: (config: TelegramConfig) => { config: TelegramConfig; changed: boolean },
-  path = telegramConfigPath(),
+  path = channelsConfigPath(),
 ): Promise<TelegramConfig> {
   return editFile(CONFIG_QUEUE, path, () => readTelegramConfig(path), (current) => {
     const result = edit(current);
     return { value: result.config, changed: result.changed };
   }, (config) => {
-    writeJsonAtomic(path, config);
+    const raw = readJson(path) ?? {};
+    writeJsonAtomic(path, { ...raw, telegram: config });
   });
 }
 
-/** Read-modify-write the runtime state under the lock. */
+/** Read-modify-write the Telegram runtime state under the lock. */
 export function editTelegramState(
   edit: (state: TelegramRuntimeState) => { state: TelegramRuntimeState; changed: boolean },
-  path = telegramStatePath(),
+  path = channelsStatePath(),
 ): Promise<TelegramRuntimeState> {
   return editFile(STATE_QUEUE, path, () => readTelegramState(path), (current) => {
     const result = edit(current);
     return { value: result.state, changed: result.changed };
   }, (state) => {
-    writeJsonAtomic(path, state);
+    const raw = readJson(path) ?? {};
+    writeJsonAtomic(path, { ...raw, telegram: state });
   });
 }
 
