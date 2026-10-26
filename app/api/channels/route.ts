@@ -98,7 +98,22 @@ export async function POST(req: NextRequest) {
           if (current.allowedChats.some((chat) => chat.id === chatId)) {
             return { config: current, changed: false };
           }
-          const allowedChats: TelegramAllowedChat[] = [...current.allowedChats, { id: chatId, title }];
+          const allowedChats: TelegramAllowedChat[] = [...current.allowedChats, { id: chatId, title, cwd: null }];
+          return { config: { ...current, allowedChats }, changed: true };
+        });
+        return NextResponse.json({ success: true });
+      }
+      case "set-chat-cwd": {
+        const chatId = (body as ChatIdBody).chatId;
+        const cwd = asTrimmedString((body as DefaultCwdBody).cwd);
+        if (typeof chatId !== "number" || !Number.isInteger(chatId)) {
+          return NextResponse.json({ error: "chatId must be an integer." }, { status: 400 });
+        }
+        await editTelegramConfig((current) => {
+          if (!current.allowedChats.some((chat) => chat.id === chatId)) {
+            return { config: current, changed: false };
+          }
+          const allowedChats = current.allowedChats.map((chat) => chat.id === chatId ? { ...chat, cwd } : chat);
           return { config: { ...current, allowedChats }, changed: true };
         });
         return NextResponse.json({ success: true });

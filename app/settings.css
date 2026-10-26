@@ -2626,3 +2626,12 @@ select.mcp-add-input {
   }
 }
 
+
+/* Settings › Channels: one allowlisted chat as a block (its row plus its
+   working-directory row) inside the detail grid list. */
+.channels-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}

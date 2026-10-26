@@ -95,7 +95,7 @@ app/api/
   skills/search/route.ts           POST skills.sh search
   subagents/settings/route.ts      GET/PUT built-in subagent switch and maxConcurrent
   web-auth/route.ts                GET status | POST login | DELETE logout (browser password)
-  channels/route.ts                GET the Channels status (token as a last-4 hint) | POST set/remove token, enable, default cwd, allow/remove chat, test send (lib/telegram/*)
+  channels/route.ts                GET the Channels status (token as a last-4 hint) | POST set/remove token, enable, default cwd, allow/remove chat, per-chat cwd, test send (lib/telegram/*)
   provider-usage/query/route.ts    POST provider usage quotas
   push/config/route.ts             GET VAPID public key
   push/subscribe/route.ts          POST register a push subscription

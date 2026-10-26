@@ -6,6 +6,8 @@ export interface TelegramAllowedChat {
   id: number;
   /** The chat's display name, recorded when it was allowlisted. */
   title: string | null;
+  /** Where this chat's sessions run; null falls back to the channel default. */
+  cwd: string | null;
 }
 
 export interface TelegramConfigView {

@@ -104,6 +104,8 @@ export const enLocale: LocalePlugin = {
     "telegram.defaultCwdSave": "Save",
     "telegram.defaultCwdSaved": "Default directory saved.",
     "telegram.noChats": "No chats allowlisted yet.",
+    "telegram.chatCwdLabel": "Working directory",
+    "telegram.chatCwdSaved": "Working directory saved. /new starts a session there.",
     "telegram.unnamedChat": "Unnamed chat",
     "telegram.testSend": "Test",
     "telegram.testSent": "Test message sent.",

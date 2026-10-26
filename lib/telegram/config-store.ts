@@ -185,8 +185,13 @@ export function parseTelegramConfig(raw: unknown): TelegramConfig {
         if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return [];
         const id = (entry as { id?: unknown }).id;
         const title = (entry as { title?: unknown }).title;
+        const cwd = (entry as { cwd?: unknown }).cwd;
         if (typeof id !== "number" || !Number.isInteger(id)) return [];
-        return [{ id, title: typeof title === "string" && title.trim() !== "" ? title : null }];
+        return [{
+          id,
+          title: typeof title === "string" && title.trim() !== "" ? title : null,
+          cwd: typeof cwd === "string" && cwd.trim() !== "" ? cwd : null,
+        }];
       })
     : [];
   return { token, enabled: record.enabled === true, defaultCwd, allowedChats };

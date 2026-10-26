@@ -4,11 +4,18 @@
 // requires; callers must keep it out of logs and API responses.
 
 const API_BASE = "https://api.telegram.org";
+const FILE_BASE = "https://api.telegram.org/file/bot";
 
 export interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;
   edited_message?: TelegramMessage;
+  callback_query?: {
+    id: string;
+    from: { id: number; username?: string; first_name?: string };
+    data?: string;
+    message?: TelegramMessage;
+  };
 }
 
 export interface TelegramMessage {
@@ -17,6 +24,16 @@ export interface TelegramMessage {
   chat: { id: number; type: string; title?: string; username?: string; first_name?: string; last_name?: string };
   from?: { id: number; username?: string; first_name?: string; last_name?: string };
   text?: string;
+  /** Photo sizes, smallest first; the last is the original resolution. */
+  photo?: { file_id: string; file_unique_id: string; width: number; height: number; file_size?: number }[];
+  voice?: { file_id: string; mime_type?: string; duration?: number };
+  caption?: string;
+  reply_to_message?: TelegramMessage;
+}
+
+export interface InlineButton {
+  text: string;
+  callback_data: string;
 }
 
 export class TelegramApiError extends Error {
@@ -84,7 +101,7 @@ export async function getUpdates(
   return call(
     token,
     "getUpdates",
-    { offset, timeout: timeoutSeconds, allowed_updates: ["message", "edited_message"] },
+    { offset, timeout: timeoutSeconds, allowed_updates: ["message", "edited_message", "callback_query"] },
     timeoutSeconds * 1000 + 15_000,
   );
 }
@@ -93,13 +110,41 @@ export async function sendMessage(
   token: string,
   chatId: number,
   text: string,
+  options: { replyMarkup?: { inline_keyboard: InlineButton[][] }; replyToMessageId?: number } = {},
 ): Promise<TelegramMessage> {
   return call(token, "sendMessage", {
     chat_id: chatId,
     // Plain text: Telegram's Markdown dialects reject more than they accept,
     // and a formatting error would drop the whole reply.
     text,
+    ...(options.replyToMessageId !== undefined ? { reply_to_message_id: options.replyToMessageId } : {}),
+    ...(options.replyMarkup !== undefined ? { reply_markup: options.replyMarkup } : {}),
     link_preview_options: { is_disabled: true },
+  });
+}
+
+export async function editMessageText(
+  token: string,
+  chatId: number,
+  messageId: number,
+  text: string,
+): Promise<void> {
+  await call(token, "editMessageText", {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    link_preview_options: { is_disabled: true },
+  });
+}
+
+export async function deleteMessage(token: string, chatId: number, messageId: number): Promise<void> {
+  await call(token, "deleteMessage", { chat_id: chatId, message_id: messageId });
+}
+
+export async function answerCallbackQuery(token: string, callbackQueryId: string, text?: string): Promise<void> {
+  await call(token, "answerCallbackQuery", {
+    callback_query_id: callbackQueryId,
+    ...(text ? { text } : {}),
   });
 }
 
@@ -113,4 +158,26 @@ export async function setMyCommands(
   commands: { command: string; description: string }[],
 ): Promise<void> {
   await call(token, "setMyCommands", { commands });
+}
+
+/** Downloads a file (photos, voice) by the file_id an update carried. */
+export async function downloadFile(token: string, fileId: string): Promise<{ bytes: Buffer; mimeType: string | null }> {
+  const file = await call<{ file_id: string; file_path?: string; file_size?: number }>(
+    token,
+    "getFile",
+    { file_id: fileId },
+  );
+  if (!file.file_path) throw new TelegramApiError("Telegram returned no file_path", null, null);
+  if ((file.file_size ?? 0) > 20 * 1024 * 1024) {
+    throw new TelegramApiError("The file is over 20 MB", "too large", null);
+  }
+  const response = await fetch(`${FILE_BASE}${token}/${file.file_path}`, {
+    signal: AbortSignal.timeout(60_000),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new TelegramApiError(`Downloading the file failed: HTTP ${response.status}`, null, response.status);
+  }
+  const mimeType = response.headers.get("content-type");
+  return { bytes: Buffer.from(await response.arrayBuffer()), mimeType };
 }

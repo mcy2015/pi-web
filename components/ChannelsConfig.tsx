@@ -255,31 +255,51 @@ export function ChannelsConfig({ embedded = true, onClose }: { embedded?: boolea
                 {config.allowedChats.length === 0 ? (
                   <ConfigEmptyState>{t("telegram.noChats")}</ConfigEmptyState>
                 ) : (
-                  <ConfigDetailGrid>
+                  <>
                     {config.allowedChats.map((chat) => (
-                      <ConfigDetailGridRow key={chat.id} label={chat.title ?? t("telegram.unnamedChat")} mono>
-                        {chat.id}
-                        <ConfigDetailActions>
-                          <ConfigButton
-                            size="small"
-                            variant="secondary"
-                            disabled={busy !== null}
-                            onClick={() => void run(`test-${chat.id}`, { action: "test-send", chatId: chat.id }, () => ({ kind: "ok", message: t("telegram.testSent") }))}
-                          >
-                            {t("telegram.testSend")}
-                          </ConfigButton>
-                          <ConfigButton
-                            size="small"
-                            variant="secondary"
-                            disabled={busy !== null}
-                            onClick={() => void run(`remove-${chat.id}`, { action: "remove-chat", chatId: chat.id }, () => ({ kind: "info", message: t("telegram.chatRemoved") }))}
-                          >
-                            {t("telegram.chatRemove")}
-                          </ConfigButton>
-                        </ConfigDetailActions>
-                      </ConfigDetailGridRow>
+                      <div key={chat.id} className="channels-chat">
+                        <ConfigDetailGrid>
+                          <ConfigDetailGridRow label={chat.title ?? t("telegram.unnamedChat")} mono>
+                            {chat.id}
+                            <ConfigDetailActions>
+                              <ConfigButton
+                                size="small"
+                                variant="secondary"
+                                disabled={busy !== null}
+                                onClick={() => void run(`test-${chat.id}`, { action: "test-send", chatId: chat.id }, () => ({ kind: "ok", message: t("telegram.testSent") }))}
+                              >
+                                {t("telegram.testSend")}
+                              </ConfigButton>
+                              <ConfigButton
+                                size="small"
+                                variant="secondary"
+                                disabled={busy !== null}
+                                onClick={() => void run(`remove-${chat.id}`, { action: "remove-chat", chatId: chat.id }, () => ({ kind: "info", message: t("telegram.chatRemoved") }))}
+                              >
+                                {t("telegram.chatRemove")}
+                              </ConfigButton>
+                            </ConfigDetailActions>
+                          </ConfigDetailGridRow>
+                          <ConfigDetailGridRow label={t("telegram.chatCwdLabel")}>
+                            <input
+                              type="text"
+                              spellCheck={false}
+                              className="mcp-add-input"
+                              placeholder={t("telegram.defaultCwdPlaceholder")}
+                              aria-label={t("telegram.chatCwdLabel")}
+                              defaultValue={chat.cwd ?? ""}
+                              key={`${chat.id}:${chat.cwd ?? ""}`}
+                              onBlur={(event) => {
+                                const value = event.target.value.trim();
+                                if (value === (chat.cwd ?? "")) return;
+                                void run(`cwd-${chat.id}`, { action: "set-chat-cwd", chatId: chat.id, cwd: value }, () => ({ kind: "ok", message: t("telegram.chatCwdSaved") }));
+                              }}
+                            />
+                          </ConfigDetailGridRow>
+                        </ConfigDetailGrid>
+                      </div>
                     ))}
-                  </ConfigDetailGrid>
+                  </>
                 )}
 
                 <ConfigSectionTitle>{t("telegram.defaultCwdLabel")}</ConfigSectionTitle>

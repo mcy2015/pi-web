@@ -104,6 +104,8 @@ export const zhTWLocale: LocalePlugin = {
     "telegram.defaultCwdSave": "儲存",
     "telegram.defaultCwdSaved": "預設目錄已儲存。",
     "telegram.noChats": "還沒有白名單對話。",
+    "telegram.chatCwdLabel": "工作目錄",
+    "telegram.chatCwdSaved": "工作目錄已儲存，/new 後新會話生效。",
     "telegram.unnamedChat": "未命名對話",
     "telegram.testSend": "測試",
     "telegram.testSent": "測試訊息已送出。",

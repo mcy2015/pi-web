@@ -1,8 +1,10 @@
 // The Telegram polling loop singleton: one long-poll loop per process, kept
 // in step with the config file (token/enabled changes restart it through
-// syncTelegramRuntime). Updates are handled one at a time in order: a long
-// agent turn holds later messages of the same chat queued in pi itself. A
-// non-allowlisted chat is never answered, only recorded for the pairing UI.
+// syncTelegramRuntime). Updates are handled one at a time in order, but a
+// turn is never awaited: pi queues it, the loop stays free, and replies (and
+// their streaming previews) arrive asynchronously. A non-allowlisted chat is
+// never answered, only recorded for the pairing UI. In groups the bot only
+// answers messages that mention it or reply to it.
 
 import {
   getUpdates,
@@ -10,7 +12,13 @@ import {
   sendMessage,
   sendChatAction,
   setMyCommands,
+  editMessageText,
+  deleteMessage,
+  answerCallbackQuery,
+  downloadFile,
+  type InlineButton,
   type TelegramUpdate,
+  type TelegramMessage,
 } from "./bot-api";
 import {
   editTelegramState,
@@ -19,13 +27,14 @@ import {
   tokenHint,
   type TelegramConfig,
 } from "./config-store";
-import { resetChatSession, runChatTurn } from "./session-bridge";
-import { splitForTelegram } from "./message-text";
+import { resetChatSession, runChatTurn, withChatWrapper, type TelegramUiRequest, type TurnImage, type TurnInput } from "./session-bridge";
+import { splitForTelegram, TELEGRAM_MESSAGE_LIMIT } from "./message-text";
 import type { TelegramStatus } from "./types";
 import { getRpcSession } from "@/lib/rpc-manager";
 
 const POLL_TIMEOUT_SECONDS = 25;
 const MAX_BACKOFF_MS = 60_000;
+const PREVIEW_EDIT_MIN_INTERVAL_MS = 1_500;
 
 interface RuntimeInfo {
   running: boolean;
@@ -128,7 +137,11 @@ async function pollLoop(loop: LoopHandle, config: TelegramConfig, epoch: number)
     for (const update of updates) {
       if (loop.cancelled || runtime().configEpoch !== epoch) break;
       await persistOffset(update.update_id + 1);
-      await handleUpdate(token, update);
+      try {
+        await handleUpdate(token, update);
+      } catch (error) {
+        console.warn(`[pi-web] telegram: handling an update failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   }
   console.log(`[pi-web] telegram loop #${epoch}: exited (cancelled=${loop.cancelled}, epoch=${runtime().configEpoch})`);
@@ -147,6 +160,8 @@ const NATIVE_COMMANDS: { command: string; description: string }[] = [
   { command: "new", description: "Start a fresh session" },
   { command: "stop", description: "Stop the running turn" },
   { command: "status", description: "Is a turn running?" },
+  { command: "name", description: "Name this chat's session" },
+  { command: "compact", description: "Compact the session context" },
   { command: "help", description: "What this bot can do" },
 ];
 
@@ -179,31 +194,202 @@ const HELP_TEXT = [
   "Pi Web is connected. Messages run in this chat's pi session; you can open it in the sidebar.",
   "/new — start a fresh session (the old one stays in the sidebar)",
   "/stop — stop the running turn",
+  "/name <title> — name (or rename) the session",
+  "/compact — compact the session context",
   "/status — is a turn running?",
-  "A message sent while a turn runs is queued as its follow-up.",
+  "Photos run with vision. A message sent while a turn runs is queued as its follow-up.",
+  "In groups I only answer messages that mention me or reply to me.",
 ].join("\n");
 
 /** The chats with a turn (or queued follow-up) still resolving, for /status. */
 const inflightTurns = new Map<number, Promise<void>>();
 
-function dispatchTurn(token: string, chatId: number, text: string): void {
+// ---- Streaming preview: one message per chat, edited in place, throttled. ----
+
+interface ChatPreview {
+  messageId: number | null;
+  lastEditAt: number;
+  lastLen: number;
+}
+const previews = new Map<number, ChatPreview>();
+
+function previewOf(chatId: number): ChatPreview {
+  let preview = previews.get(chatId);
+  if (!preview) {
+    preview = { messageId: null, lastEditAt: 0, lastLen: 0 };
+    previews.set(chatId, preview);
+  }
+  return preview;
+}
+
+async function ensurePreviewMessage(token: string, chatId: number, text: string): Promise<void> {
+  const preview = previewOf(chatId);
+  if (preview.messageId !== null) return;
+  try {
+    const sent = await sendMessage(token, chatId, text);
+    preview.messageId = sent.message_id;
+    preview.lastEditAt = Date.now();
+    preview.lastLen = text.length;
+  } catch (error) {
+    console.warn(`[pi-web] telegram chat ${chatId}: starting the preview failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function editPreview(token: string, chatId: number, text: string): Promise<void> {
+  const preview = previewOf(chatId);
+  if (preview.messageId === null) return;
+  try {
+    await editMessageText(token, chatId, preview.messageId, text);
+    preview.lastEditAt = Date.now();
+    preview.lastLen = text.length;
+  } catch (error) {
+    console.warn(`[pi-web] telegram chat ${chatId}: editing the preview failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function previewWantsEdit(preview: ChatPreview, text: string, now = Date.now()): boolean {
+  if (now - preview.lastEditAt < PREVIEW_EDIT_MIN_INTERVAL_MS) return false;
+  // Only for meaningfully longer text: Telegram rate limits edits hard.
+  return text.length - preview.lastLen >= 40 || (text.length < 200 && text !== "" && preview.lastLen === 0);
+}
+
+// ---- Inline-button approvals: blocking extension dialogs become buttons. ----
+
+interface PendingUi {
+  chatId: number;
+  kind: "select" | "confirm";
+  options?: string[];
+  messageId: number;
+}
+const pendingUi = new Map<string, PendingUi>();
+
+function buttonsFor(request: TelegramUiRequest): InlineButton[][] {
+  if (request.method === "confirm") {
+    return [
+      [
+        { text: "✅ Confirm", callback_data: `ui:${request.id}:y` },
+        { text: "❌ Cancel", callback_data: `ui:${request.id}:n` },
+      ],
+    ];
+  }
+  return (request.options ?? []).slice(0, 8).map((option, index) => [
+    { text: option.length > 60 ? `${option.slice(0, 57)}…` : option, callback_data: `ui:${request.id}:${index}` },
+  ]);
+}
+
+async function offerUiRequest(token: string, chatId: number, request: TelegramUiRequest): Promise<void> {
+  if (request.method === "input" || request.method === "editor") {
+    // No keyboard path for free text: the browser session can still answer.
+    await reply(token, chatId, `⌨️ ${request.title}\nThe turn is waiting for typed input — answer it in the Pi Web session (it is in the sidebar).`);
+    return;
+  }
+  const text = request.method === "confirm"
+    ? `⚠️ ${request.title}${request.message ? `\n${request.message}` : ""}`
+    : `❓ ${request.title}`;
+  try {
+    const sent = await sendMessage(token, chatId, text, { replyMarkup: { inline_keyboard: buttonsFor(request) } });
+    pendingUi.set(request.id, {
+      chatId,
+      kind: request.method as "select" | "confirm",
+      options: request.options,
+      messageId: sent.message_id,
+    });
+  } catch (error) {
+    console.warn(`[pi-web] telegram chat ${chatId}: offering an approval failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function handleCallbackQuery(token: string, callbackQuery: NonNullable<TelegramUpdate["callback_query"]>): Promise<void> {
+  const data = callbackQuery.data ?? "";
+  if (!data.startsWith("ui:")) {
+    await answerCallbackQuery(token, callbackQuery.id).catch(() => {});
+    return;
+  }
+  const [, requestId, choice] = data.split(":");
+  const pending = pendingUi.get(requestId);
+  const chatId = pending?.chatId ?? callbackQuery.message?.chat.id;
+  if (!pending || chatId === undefined) {
+    await answerCallbackQuery(token, callbackQuery.id, "Expired").catch(() => {});
+    return;
+  }
+  const binding = readTelegramState().chats[String(pending.chatId)];
+  const wrapper = binding ? getRpcSession(binding.sessionId) : undefined;
+  if (!wrapper || !wrapper.isAlive()) {
+    await answerCallbackQuery(token, callbackQuery.id, "Session gone").catch(() => {});
+    return;
+  }
+  let chosenLabel = "";
+  try {
+    if (pending.kind === "confirm") {
+      const confirmed = choice === "y";
+      chosenLabel = confirmed ? "✅ Confirmed" : "❌ Cancelled";
+      await wrapper.send({ type: "extension_ui_response", id: requestId, confirmed });
+    } else {
+      const option = pending.options?.[Number(choice)];
+      if (option === undefined) throw new Error("No such option");
+      chosenLabel = option;
+      await wrapper.send({ type: "extension_ui_response", id: requestId, value: option });
+    }
+  } catch (error) {
+    console.warn(`[pi-web] telegram chat ${pending.chatId}: answering an approval failed: ${error instanceof Error ? error.message : String(error)}`);
+    await answerCallbackQuery(token, callbackQuery.id, "Failed").catch(() => {});
+    return;
+  }
+  pendingUi.delete(requestId);
+  await answerCallbackQuery(token, callbackQuery.id, "✓").catch(() => {});
+  await editMessageText(token, pending.chatId, pending.messageId, `✓ Chosen: ${chosenLabel}`).catch(() => {});
+}
+
+// ---- Turn dispatch: preview lifecycle + media + approvals. ----
+
+function dispatchTurn(token: string, chatId: number, input: TurnInput): void {
   // Not awaited: pi queues a prompt sent mid-run as a follow-up turn, so the
   // polling loop stays free for /stop and other chats.
   const turn = (async () => {
     const config = readTelegramConfig();
-    const outcome = await runChatTurn(chatId, text, config, () => sendChatAction(token, chatId));
+    const outcome = await runChatTurn(chatId, input, config, () => sendChatAction(token, chatId));
+    const preview = previewOf(chatId);
     if (outcome.error) {
-      await reply(token, chatId, `❌ ${outcome.error}`);
+      const errorText = `❌ ${outcome.error}`;
+      if (preview.messageId !== null && errorText.length <= TELEGRAM_MESSAGE_LIMIT) {
+        await editPreview(token, chatId, errorText);
+        preview.messageId = null;
+      } else {
+        if (preview.messageId !== null) await deleteMessage(token, chatId, preview.messageId).catch(() => {});
+        preview.messageId = null;
+        await reply(token, chatId, errorText);
+      }
       return;
     }
     if (outcome.aborted) {
-      await reply(token, chatId, outcome.reply.trim() !== "" ? outcome.reply : "⏹ Stopped.");
+      const text = outcome.reply.trim() !== "" ? outcome.reply : "⏹ Stopped.";
+      if (preview.messageId !== null && text.length <= TELEGRAM_MESSAGE_LIMIT) {
+        await editPreview(token, chatId, text);
+        preview.messageId = null;
+      } else {
+        if (preview.messageId !== null) await deleteMessage(token, chatId, preview.messageId).catch(() => {});
+        preview.messageId = null;
+        await reply(token, chatId, text);
+      }
       return;
     }
     if (outcome.reply.trim() === "") {
-      await reply(token, chatId, "✅ The turn finished without a text reply.");
+      const text = "✅ The turn finished without a text reply.";
+      if (preview.messageId !== null) {
+        await editPreview(token, chatId, text);
+        preview.messageId = null;
+      } else {
+        await reply(token, chatId, text);
+      }
       return;
     }
+    if (preview.messageId !== null && outcome.reply.length <= TELEGRAM_MESSAGE_LIMIT) {
+      await editPreview(token, chatId, outcome.reply);
+      preview.messageId = null;
+      return;
+    }
+    if (preview.messageId !== null) await deleteMessage(token, chatId, preview.messageId).catch(() => {});
+    preview.messageId = null;
     await reply(token, chatId, outcome.reply);
   })().finally(() => {
     if (inflightTurns.get(chatId) === turn) inflightTurns.delete(chatId);
@@ -211,9 +397,64 @@ function dispatchTurn(token: string, chatId: number, text: string): void {
   inflightTurns.set(chatId, turn);
 }
 
+/** Photos: the largest size, downloaded and run with vision. */
+async function dispatchPhoto(token: string, chatId: number, message: TelegramMessage): Promise<void> {
+  const largest = message.photo?.[message.photo.length - 1];
+  if (!largest) return;
+  await sendChatAction(token, chatId).catch(() => {});
+  let bytes: Buffer;
+  let mimeType: string | null;
+  try {
+    ({ bytes, mimeType } = await downloadFile(token, largest.file_id));
+  } catch (error) {
+    await reply(token, chatId, `❌ Downloading the photo failed: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+  const images: TurnImage[] = [{
+    type: "image",
+    data: bytes.toString("base64"),
+    mimeType: mimeType && mimeType.startsWith("image/") ? mimeType : "image/jpeg",
+  }];
+  dispatchTurn(token, chatId, { text: message.caption?.trim() || "Look at this image.", images });
+}
+
+/** Voice: transcribed through a local OpenAI-compatible endpoint when one runs. */
+async function dispatchVoice(token: string, chatId: number, message: TelegramMessage): Promise<void> {
+  const voice = message.voice;
+  if (!voice) return;
+  let bytes: Buffer;
+  try {
+    ({ bytes } = await downloadFile(token, voice.file_id));
+  } catch (error) {
+    await reply(token, chatId, `❌ Downloading the voice message failed: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+  try {
+    const form = new FormData();
+    form.append("file", new Blob([bytes as unknown as BlobPart], { type: "audio/ogg" }), "voice.ogg");
+    form.append("model", "whisper-1");
+    const response = await fetch("http://127.0.0.1:1234/v1/audio/transcriptions", {
+      method: "POST",
+      body: form,
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json() as { text?: string };
+    const text = payload.text?.trim();
+    if (!text) throw new Error("empty transcript");
+    dispatchTurn(token, chatId, { text: `${text}\n(a voice message, transcribed)` });
+  } catch (error) {
+    await reply(token, chatId, `🎤 Voice transcription is unavailable (${error instanceof Error ? error.message : String(error)}). Please type, or send a photo.`);
+  }
+}
+
 async function handleUpdate(token: string, update: TelegramUpdate): Promise<void> {
+  if (update.callback_query) {
+    await handleCallbackQuery(token, update.callback_query);
+    return;
+  }
   const message = update.message ?? update.edited_message;
-  if (!message || typeof message.text !== "string" || message.text.trim() === "") return;
+  if (!message) return;
   const chatId = message.chat.id;
   const title = message.chat.title
     ?? (message.chat.username ? `@${message.chat.username}` : null)
@@ -230,7 +471,27 @@ async function handleUpdate(token: string, update: TelegramUpdate): Promise<void
     })).catch(() => {});
     return;
   }
-  const text = message.text.trim();
+  let text = (message.text ?? "").trim();
+  const botUsername = runtime().info.botUsername;
+  // Groups: only messages that mention the bot or reply to it are answered.
+  if (message.chat.type === "group" || message.chat.type === "supergroup") {
+    const mentioned = botUsername !== null && text.includes(`@${botUsername}`);
+    const replyToBot = message.reply_to_message?.from?.username !== undefined
+      && message.reply_to_message.from.username === botUsername;
+    const commandsAnswered = text.startsWith("/") && (mentioned || replyToBot);
+    if (!mentioned && !replyToBot && !commandsAnswered) return;
+    if (botUsername !== null) text = text.split(`@${botUsername}`).join("").trim();
+  }
+  if (message.voice) {
+    await dispatchVoice(token, chatId, message);
+    return;
+  }
+  if (message.photo?.length) {
+    await dispatchPhoto(token, chatId, message);
+    return;
+  }
+  if (text === "") return;
+
   if (text === "/start" || text === "/help") {
     await reply(token, chatId, HELP_TEXT);
     return;
@@ -255,6 +516,31 @@ async function handleUpdate(token: string, update: TelegramUpdate): Promise<void
     }
     return;
   }
+  if (text === "/name" || text.startsWith("/name ")) {
+    const name = text.slice(5).trim();
+    if (name === "") {
+      const binding = readTelegramState().chats[String(chatId)];
+      const wrapper = binding ? getRpcSession(binding.sessionId) : undefined;
+      const state = wrapper && wrapper.isAlive() ? await wrapper.send({ type: "get_state" }) as { sessionName?: string | null } : null;
+      await reply(token, chatId, state?.sessionName ? `📌 Current name: ${state.sessionName}` : "📌 No name yet. Use /name <title>.");
+      return;
+    }
+    const result = await withChatWrapper(chatId, config, async (wrapper) => {
+      await wrapper.send({ type: "set_session_name", name });
+      return { outcome: "named" as const };
+    });
+    await reply(token, chatId, "error" in result ? `❌ ${result.error}` : `✏️ Session named “${name}”.`);
+    return;
+  }
+  if (text === "/compact") {
+    const result = await withChatWrapper(chatId, config, async (wrapper) => {
+      await reply(token, chatId, "🧹 Compacting…");
+      await wrapper.send({ type: "compact" });
+      return { outcome: "compacted" as const };
+    });
+    await reply(token, chatId, "error" in result ? `❌ ${result.error}` : "✅ Session compacted.");
+    return;
+  }
   if (text === "/status") {
     const binding = readTelegramState().chats[String(chatId)];
     const running = inflightTurns.has(chatId)
@@ -271,5 +557,20 @@ async function handleUpdate(token: string, update: TelegramUpdate): Promise<void
     // The turn still resolving gets this message queued behind it by pi.
     await sendChatAction(token, chatId).catch(() => {});
   }
-  dispatchTurn(token, chatId, text);
+  void ensurePreviewMessage(token, chatId, "…");
+  dispatchTurn(token, chatId, {
+    text,
+    onProgress: (partial) => {
+      const preview = previewOf(chatId);
+      const shown = partial.length > TELEGRAM_MESSAGE_LIMIT - 10
+        ? `${partial.slice(0, TELEGRAM_MESSAGE_LIMIT - 12)}…\n▍`
+        : `${partial}\n▍`;
+      if (preview.messageId === null || previewWantsEdit(preview, shown)) {
+        void editPreview(token, chatId, shown);
+      }
+    },
+    onUiRequest: (request) => {
+      void offerUiRequest(token, chatId, request);
+    },
+  });
 }
