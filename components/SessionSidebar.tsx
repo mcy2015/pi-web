@@ -89,6 +89,7 @@ import { PiWebTitle } from "./PiWebTitle";
 import { ProjectWorktreePicker, type ProjectWorktreePickerHandle, type WorktreeRemoval } from "./ProjectWorktreePicker";
 import { SessionSearch } from "./SessionSearch";
 import { SessionTree, sessionRowTitle, type SessionTreeReveal } from "./SessionTree";
+import { SharePanel } from "./SharePanel";
 import { SidebarMenu, type SidebarMenuAnchor, type SidebarMenuItem } from "./SidebarMenu";
 import { SidebarToast, type SidebarToastAction, type SidebarToastData } from "./SidebarToast";
 import {
@@ -111,6 +112,7 @@ import {
   RefreshIcon,
   RestoreIcon,
   SearchIcon,
+  ShareIcon,
   TerminalIcon,
   TrashIcon,
   UploadIcon,
@@ -290,7 +292,7 @@ type SessionRow = Extract<SidebarRow, { kind: "session" }>;
  * sessions", an archive header's "Delete all", the archive bar's two).
  */
 type SidebarMenuState =
-  | { kind: "row"; row: SessionRow; anchor: SidebarMenuAnchor; opener: HTMLElement | null }
+  | { kind: "row"; row: SessionRow; anchor: SidebarMenuAnchor; opener: HTMLElement | null; share?: boolean }
   | { kind: "group"; project: SidebarProject; olderCount: number; anchor: SidebarMenuAnchor; opener: HTMLElement; askDelete?: boolean }
   | { kind: "archive-group"; project: SidebarProject; anchor: SidebarMenuAnchor; opener: HTMLElement; askDelete?: boolean }
   | { kind: "archive"; anchor: SidebarMenuAnchor; opener: HTMLElement; askDelete?: ArchiveDeleteScope };
@@ -330,6 +332,7 @@ const SESSION_ACTION_LABEL_KEYS: Record<SessionMenuActionId, string> = {
   unpin: "sidebar.unpin",
   rename: "sidebar.rename",
   fork: "sidebar.fork",
+  share: "sidebar.sessionShare",
   "mark-read": "sidebar.markRead",
   "mark-unread": "sidebar.markUnread",
   archive: "sidebar.archive",
@@ -344,6 +347,7 @@ function sessionActionIcon(id: SessionMenuActionId): ReactNode {
     case "unpin": return <PinOffIcon />;
     case "rename": return <PencilIcon />;
     case "fork": return <ForkIcon />;
+    case "share": return <ShareIcon />;
     case "mark-read": return <DotOutlineIcon />;
     case "mark-unread": return <DotIcon />;
     case "archive": return <ArchiveIcon />;
@@ -1985,7 +1989,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     window.open(sessionDeepLink(family.root.id), "_blank", "noopener,noreferrer");
   }, []);
 
-  const runSessionAction = (id: SessionMenuActionId, row: SessionRow, shiftKey: boolean) => {
+  const runSessionAction = (id: SessionMenuActionId, row: SessionRow, shiftKey: boolean, keepOpen?: () => void) => {
     const { family } = row;
     switch (id) {
       case "open-new-tab": openFamilyInNewTab(family); break;
@@ -1993,6 +1997,15 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       case "unpin": setFamilyPinned(family, false); break;
       case "rename": startRename(family); break;
       case "fork": void forkFamily(row); break;
+      case "share": {
+        // The menu stays open and swaps its items for the share body; the
+        // same menu instance keeps its anchor and Escape handling.
+        keepOpen?.();
+        setMenu((current) => current?.kind === "row" && current.row.key === row.key
+          ? { ...current, share: true }
+          : current);
+        break;
+      }
       case "mark-read": markFamilyRead(family, true); break;
       case "mark-unread": markFamilyRead(family, false); break;
       case "archive": archiveFamily(family); break;
@@ -2308,13 +2321,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     return {
       type: "item",
       id: entry.id,
-      label: entry.id === "delete" ? `${label}…` : label,
+      label: entry.id === "delete" || entry.id === "share" ? `${label}…` : label,
       icon: sessionActionIcon(entry.id),
       shortcut: entry.shortcut,
       danger: entry.id === "delete",
       disabled: entry.disabledReason !== undefined,
       disabledReason: entry.disabledReason === "running" ? t("sidebar.cannotArchiveRunning") : undefined,
-      onSelect: ({ shiftKey }) => runSessionAction(entry.id, row, shiftKey),
+      onSelect: ({ shiftKey, keepOpen }) => runSessionAction(entry.id, row, shiftKey, keepOpen),
     };
   });
 
@@ -2575,6 +2588,19 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     menuTitle = sessionRowTitle(menuRow.family.root);
     menuLabel = t("sidebar.sessionActions");
     menuItems = sessionMenuItems(menuRow);
+    if (menu.share) {
+      // The menu's items are replaced by the share body (the "Share…" item
+      // kept the menu open for exactly this swap).
+      menuItems = undefined;
+      menuBody = (
+        <SharePanel
+          sessionId={menuRow.family.root.id}
+          onCopied={() => showToast(t("share.copiedToast"))}
+          onStopped={() => showToast(t("share.stoppedToast"))}
+        />
+      );
+      menuWidth = 320;
+    }
   } else if (menu?.kind === "group") {
     // The project as the tree has it now: pinned, unpinned, renamed or moved in another window while the menu is open.
     const project = projectByKey.get(menu.project.key) ?? menu.project;

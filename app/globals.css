@@ -559,6 +559,53 @@ html.dark .web-login-error {
   cursor: not-allowed;
 }
 
+/* The public, read-only share page (components/SharedSessionView.tsx): it
+   reuses MessageView for the transcript and borrows the chat look. */
+.shared-session {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+}
+.shared-session-header {
+  padding: 28px 20px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.shared-session-header h1 {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.shared-session-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.shared-session-cwd {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.shared-session-messages {
+  flex: 1;
+  width: min(100%, 860px);
+  margin: 0 auto;
+  padding: 16px 20px 32px;
+  display: flex;
+  flex-direction: column;
+}
+.shared-session-footer {
+  padding: 14px 20px 20px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
 /* The terminal has its own light/dark choice (lib/terminal-theme.ts), apart
    from the app theme. Its backgrounds match the xterm palettes there. */
 .terminal-panel {

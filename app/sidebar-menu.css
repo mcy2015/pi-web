@@ -891,3 +891,124 @@ html[data-keyboard-open] .sidebar-sheet {
   height: 40px;
   font-size: 14px;
 }
+
+/* A session row's "Share…" body (components/SharePanel.tsx): the disclosure
+   before a share exists, the link with Copy / Refresh / Stop once it does.
+   Same slot as the delete question above. */
+.sidebar-share-panel {
+  padding: 2px 4px 4px;
+}
+
+.sidebar-share-panel .sidebar-menu-header {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.sidebar-share-text {
+  margin: 0;
+  padding: 2px 4px 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.sidebar-share-note {
+  margin: 4px 4px 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.sidebar-share-status {
+  margin: 0;
+  padding: 2px 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.sidebar-share-link-label {
+  padding: 2px 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.sidebar-share-link {
+  display: block;
+  margin: 2px 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.sidebar-share-buttons {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.sidebar-share-buttons button {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sidebar-share-buttons button:not(:disabled):hover {
+  background: var(--bg-hover);
+}
+
+.sidebar-share-buttons button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.sidebar-share-buttons button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.sidebar-share-create {
+  border-color: var(--accent) !important;
+  background: var(--accent) !important;
+  color: var(--text) !important;
+  font-weight: 600;
+}
+
+.sidebar-share-stop.is-armed {
+  border-color: #ef4444;
+  background: #ef4444;
+  color: #fff;
+  font-weight: 600;
+}
+
+.sidebar-share-error {
+  margin: 8px 4px 0;
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.sidebar-sheet .sidebar-share-panel {
+  padding: 4px 16px 4px;
+}
+
+.sidebar-sheet .sidebar-share-text,
+.sidebar-sheet .sidebar-share-status {
+  font-size: 14px;
+}
+
+.sidebar-sheet .sidebar-share-buttons button {
+  height: 40px;
+  font-size: 14px;
+}

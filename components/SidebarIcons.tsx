@@ -188,6 +188,17 @@ export function TerminalIcon(props: SidebarIconProps) {
   );
 }
 
+/** A link leaving a box: a session row's "Share…" (a public, read-only link). */
+export function ShareIcon(props: SidebarIconProps) {
+  return (
+    <SidebarIcon {...props}>
+      <path d="M18 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" />
+      <path d="M6 21a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" />
+      <path d="M15.5 5.5 8.5 18.5" />
+    </SidebarIcon>
+  );
+}
+
 export function SearchIcon(props: SidebarIconProps) {
   return (
     <SidebarIcon {...props}>

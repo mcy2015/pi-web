@@ -21,6 +21,7 @@ export type SessionMenuActionId =
   | "unpin"
   | "rename"
   | "fork"
+  | "share"
   | "mark-read"
   | "mark-unread"
   | "archive"
@@ -34,7 +35,9 @@ export type SessionMenuEntry =
 /**
  * A session row's built-in menu. A transient session has no file yet, so it
  * gets none: pin, archive, rename, fork and delete would all act on a missing
- * file, and another tab could not load it.
+ * file, and another tab could not load it. Share turns the menu into the
+ * session's share body (a read-only link to the session's current branch),
+ * so it follows Fork everywhere Fork is offered.
  * In the archive view, Pin also restores (pin and archive exclude each other).
  */
 export function sessionMenuEntries(
@@ -49,6 +52,7 @@ export function sessionMenuEntries(
       { kind: "action", id: "pin", shortcut: "P" },
       { kind: "action", id: "rename", shortcut: "R" },
       { kind: "action", id: "fork", shortcut: "F" },
+      { kind: "action", id: "share", shortcut: "S" },
       openNewTab,
       { kind: "separator" },
       { kind: "action", id: "delete", shortcut: "D" },
@@ -58,6 +62,7 @@ export function sessionMenuEntries(
     { kind: "action", id: context === "pinned" ? "unpin" : "pin", shortcut: "P" },
     { kind: "action", id: "rename", shortcut: "R" },
     { kind: "action", id: "fork", shortcut: "F" },
+    { kind: "action", id: "share", shortcut: "S" },
     { kind: "action", id: status.unread ? "mark-read" : "mark-unread", shortcut: "U" },
     // A running family would come straight back: archiving waits for the run.
     status.running

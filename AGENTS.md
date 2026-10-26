@@ -37,11 +37,13 @@ pi's packages depend on each other with `^` ranges, and the published pi-web's d
 ## File Map
 
 ```
+app/share/[code]/page.tsx         GET the public, login-free share page: server component, no API
 app/api/
   sessions/route.ts                GET list all sessions
   sessions/[id]/route.ts           GET/PATCH/DELETE a session
   sessions/[id]/context/route.ts   GET ?leafId=&tail=&before= a page of a leaf's context (tail defaults to 50; before pages upward)
   sessions/[id]/export/route.ts    GET exported HTML
+  sessions/[id]/share/route.ts     GET share state | POST create/refresh the snapshot | DELETE revoke (lib/share-store.ts)
   sessions/[id]/fork/route.ts      POST copy the session's current branch into a new session (never starts an AgentSession)
   sessions/delete/route.ts         POST { ids } delete sessions and their subagents (a project's Delete all sessions); running ones kept
   sessions/stats/route.ts          POST { ids } each session's tokens, cost, tool calls, active time (the agent switcher's rows)
@@ -99,6 +101,9 @@ app/api/
   app-update/route.ts              GET current vs latest published pi-web version
 
 lib/
+  share-store.ts             pi-web-shares.json: one share per session, locked atomic writes, corrupt file set aside
+  share-snapshot.ts          the frozen projection a share serves: active branch, inline media, 25 MB cap
+  share-types.ts             client-safe share types and the share-code pattern
   agent-client.ts           typed fetch helper for /api/agent commands
   rpc-manager.ts            AgentSessionWrapper, registry, startRpcSession
   session-reader.ts         SessionManager wrappers, path cache, buildSessionContext adapter
@@ -184,6 +189,8 @@ lib/
   mcp-tool-display.ts       server/tool label of an mcp__ call from its result details, never the name
 
 components/
+  SharePanel.tsx             session row's Share menu body: disclosure, link, copy/refresh/stop
+  SharedSessionView.tsx      the public /share/<code> page's read-only view (MessageView reused, passive props only)
   AppShell.tsx             layout, URL state, tab management
   SessionSidebar.tsx       toolbar row (Sessions | Files tabs, or the Pi Web brand with the files below them; new, search): tree, archive, menus, toast; files section (resizable, foldable; one header row with the file keys and changed-files count, the picker's row) or tab (picker boxes + file buttons), FileExplorer
   PiWebTitle.tsx           the sidebar's "Pi Web" brand (files below the sessions only): a click scrambles it into the versions
