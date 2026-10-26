@@ -8,6 +8,7 @@ export const zhTWLocale: LocalePlugin = {
     "common.ok": "確定",
     "common.language": "語言",
     "common.models": "模型",
+    "common.automations": "任務",
     "common.skills": "技能",
     "common.agents": "子代理",
     "common.plugins": "外掛",

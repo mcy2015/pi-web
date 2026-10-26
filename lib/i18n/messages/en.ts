@@ -8,6 +8,7 @@ export const enLocale: LocalePlugin = {
     "common.ok": "OK",
     "common.language": "Language",
     "common.models": "Models",
+    "common.automations": "Tasks",
     "common.skills": "Skills",
     "common.agents": "Sub-agents",
     "common.plugins": "Plugins",

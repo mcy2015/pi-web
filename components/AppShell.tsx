@@ -1502,6 +1502,7 @@ export function AppShell() {
         {([
           ["models", translate("common.models")],
           ["skills", translate("common.skills")],
+          ["automations", translate("common.automations")],
         ] as const).map(([section, label]) => {
           const disabled = settingsSectionRequiresProject(section) && !projectTrustCwd;
           return (
