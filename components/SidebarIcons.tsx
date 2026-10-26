@@ -188,6 +188,19 @@ export function TerminalIcon(props: SidebarIconProps) {
   );
 }
 
+export function GitGraphIcon(props: SidebarIconProps) {
+  return (
+    <SidebarIcon {...props}>
+      <circle cx="5" cy="6" r="2.5" />
+      <circle cx="5" cy="18" r="2.5" />
+      <circle cx="19" cy="12" r="2.5" />
+      <path d="M5 8.5v7" />
+      <path d="M7.5 6H12a7 7 0 0 1 7 7v.01" />
+      <path d="M7.5 18H12" />
+    </SidebarIcon>
+  );
+}
+
 /** A link leaving a box: a session row's "Share…" (a public, read-only link). */
 export function ShareIcon(props: SidebarIconProps) {
   return (

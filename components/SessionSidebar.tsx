@@ -101,6 +101,7 @@ import {
   DotOutlineIcon,
   EyeIcon,
   FolderIcon,
+  GitGraphIcon,
   MessageIcon,
   MoreIcon,
   ForkIcon,
@@ -223,6 +224,7 @@ interface Props {
   ) => void;
   onOpenFile?: (filePath: string, fileName: string, options?: { sourceSessionId?: string | null; modeHint?: "diff" }) => void;
   onOpenTerminal?: (cwd: string) => void;
+  onOpenGitGraph?: (cwd: string) => void;
   explorerRefreshKey?: number;
   onExplorerRefresh?: () => void;
   onAtMention?: (relativePath: string, isDir: boolean) => void;
@@ -504,7 +506,7 @@ function buttonAnchor(element: HTMLElement, align: "start" | "end"): SidebarMenu
   return { kind: "rect", rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }, align };
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, controlRef, onNewSessionContextChange, initialSessionId, initialSessionLinked, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, onOpenTerminal, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onSessionsChange }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, controlRef, onNewSessionContextChange, initialSessionId, initialSessionLinked, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, onOpenTerminal, onOpenGitGraph, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onSessionsChange }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
@@ -2800,6 +2802,16 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       <ChangesIcon size={keyIconSize} />
     </ToolbarIconButton>
   );
+  // The folder's commit graph, as a right-panel tab of its own.
+  const gitGraphButton = (
+    <ToolbarIconButton
+      onClick={() => { if (explorerCwd) onOpenGitGraph?.(explorerCwd); }}
+      disabled={!explorerCwd || !onOpenGitGraph}
+      title={t("sidebar.openGitGraph")}
+    >
+      <GitGraphIcon size={keyIconSize} />
+    </ToolbarIconButton>
+  );
 
   return (
     <div
@@ -3064,6 +3076,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               {refreshButton}
               {ignoredFilesButton()}
               {changesButton}
+              {gitGraphButton}
               <ToolbarIconButton
                 onClick={() => {
                   // Folded, the section opens first, with the field open and focused.
@@ -3135,6 +3148,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 {refreshButton}
                 {ignoredFilesButton("sidebar-files-views-start")}
                 {changesButton}
+                {gitGraphButton}
               </div>
             )}
           </div>
