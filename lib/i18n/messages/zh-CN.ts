@@ -435,6 +435,8 @@ export const zhCNLocale: LocalePlugin = {
     "sidebar.forkEmpty": "没有可分叉的内容：此分支还没有消息",
     "sidebar.forkUnavailable": "无法分叉此会话",
     "sidebar.sessionShare": "分享…",
+    "sidebar.copySessionId": "复制会话 ID",
+    "sidebar.sessionIdCopied": "会话 ID 已复制",
     "share.title": "分享此会话",
     "share.description": "将生成公开的只读链接，包含此会话当前分支的全部消息、回复与工具调用的输入输出（含文件路径、命令与终端输出），图片会内嵌。",
     "share.summary": "{count} 条消息",

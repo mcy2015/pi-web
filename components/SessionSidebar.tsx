@@ -85,6 +85,7 @@ import { archiveViewState, filesFoldState, useSidebarMotion } from "@/hooks/useS
 import { DirectoryPicker } from "./DirectoryPicker";
 import { DismissButton } from "./DismissButton";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
+import { copyText } from "@/lib/clipboard";
 import { PiWebTitle } from "./PiWebTitle";
 import { ProjectWorktreePicker, type ProjectWorktreePickerHandle, type WorktreeRemoval } from "./ProjectWorktreePicker";
 import { SessionSearch } from "./SessionSearch";
@@ -97,6 +98,7 @@ import {
   ChangesIcon,
   CheckIcon,
   ChevronIcon,
+  CopyIcon,
   DotIcon,
   DotOutlineIcon,
   EyeIcon,
@@ -335,6 +337,7 @@ const SESSION_ACTION_LABEL_KEYS: Record<SessionMenuActionId, string> = {
   rename: "sidebar.rename",
   fork: "sidebar.fork",
   share: "sidebar.sessionShare",
+  "copy-session-id": "sidebar.copySessionId",
   "mark-read": "sidebar.markRead",
   "mark-unread": "sidebar.markUnread",
   archive: "sidebar.archive",
@@ -350,6 +353,7 @@ function sessionActionIcon(id: SessionMenuActionId): ReactNode {
     case "rename": return <PencilIcon />;
     case "fork": return <ForkIcon />;
     case "share": return <ShareIcon />;
+    case "copy-session-id": return <CopyIcon />;
     case "mark-read": return <DotOutlineIcon />;
     case "mark-unread": return <DotIcon />;
     case "archive": return <ArchiveIcon />;
@@ -2008,6 +2012,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           : current);
         break;
       }
+      case "copy-session-id":
+        // The id alone is enough: an agent locates the session file by it
+        // (~/.pi/agent/sessions/**/<timestamp>_<id>.jsonl) and reads the jsonl.
+        void copyText(family.root.id).then(() => showToast(t("sidebar.sessionIdCopied")), () => {});
+        break;
       case "mark-read": markFamilyRead(family, true); break;
       case "mark-unread": markFamilyRead(family, false); break;
       case "archive": archiveFamily(family); break;

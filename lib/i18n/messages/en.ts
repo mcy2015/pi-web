@@ -435,6 +435,8 @@ export const enLocale: LocalePlugin = {
     "sidebar.forkEmpty": "Nothing to fork: this branch has no messages yet",
     "sidebar.forkUnavailable": "This session can’t be forked",
     "sidebar.sessionShare": "Share…",
+    "sidebar.copySessionId": "Copy session ID",
+    "sidebar.sessionIdCopied": "Session ID copied",
     "share.title": "Share this session",
     "share.description": "Creates a public, read-only link of this session’s current branch: every message, reply and tool call input and output, including file paths, commands and terminal output. Images are embedded.",
     "share.summary": "{count} messages",

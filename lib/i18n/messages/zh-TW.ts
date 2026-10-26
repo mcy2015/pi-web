@@ -435,6 +435,8 @@ export const zhTWLocale: LocalePlugin = {
     "sidebar.forkEmpty": "沒有可分叉的內容：此分支還沒有訊息",
     "sidebar.forkUnavailable": "無法分叉此工作階段",
     "sidebar.sessionShare": "分享…",
+    "sidebar.copySessionId": "複製工作階段 ID",
+    "sidebar.sessionIdCopied": "工作階段 ID 已複製",
     "share.title": "分享此對話",
     "share.description": "將產生公開的唯讀連結，包含此對話目前分支的所有訊息、回覆與工具呼叫的輸入輸出（含檔案路徑、指令與終端機輸出），圖片會內嵌。",
     "share.summary": "{count} 則訊息",
