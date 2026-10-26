@@ -104,12 +104,27 @@ export async function runChatTurn(
   }
 
   let lastAssistantText = "";
+  // send() only acknowledges acceptance (pi's RPC contract acknowledges a
+  // prompt once validation and preflight take it); the turn's real end is
+  // the prompt_done event, prompt_error for a failure after acceptance.
+  let settleDone!: () => void;
+  let settleFailed!: (error: Error) => void;
+  const done = new Promise<void>((resolve, reject) => {
+    settleDone = resolve;
+    settleFailed = reject;
+  });
   const unsubscribe = wrapper.onEvent((event) => {
-    if (event.type !== "message_end") return;
-    const message = (event as { message?: { role?: string; content?: unknown } }).message;
-    if (!message || message.role !== "assistant") return;
-    const extracted = agentMessageText(message as { role: string; content: unknown });
-    if (extracted.trim() !== "") lastAssistantText = extracted;
+    if (event.type === "message_end") {
+      const message = (event as { message?: { role?: string; content?: unknown } }).message;
+      if (message && message.role === "assistant") {
+        const extracted = agentMessageText(message as { role: string; content: unknown });
+        if (extracted.trim() !== "") lastAssistantText = extracted;
+      }
+    } else if (event.type === "prompt_done") {
+      settleDone();
+    } else if (event.type === "prompt_error") {
+      settleFailed(new Error((event as { errorMessage?: string }).errorMessage ?? "The turn failed"));
+    }
   });
 
   const typingTimer = setInterval(() => {
@@ -117,6 +132,7 @@ export async function runChatTurn(
   }, 5_000);
   try {
     await wrapper.send({ type: "prompt", message: text });
+    await done;
     return { reply: lastAssistantText, error: null, sessionId };
   } catch (error) {
     return { reply: "", error: `The turn failed: ${error instanceof Error ? error.message : String(error)}`, sessionId };
