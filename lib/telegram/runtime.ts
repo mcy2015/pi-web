@@ -105,17 +105,27 @@ async function pollLoop(loop: LoopHandle, config: TelegramConfig, epoch: number)
   const current = runtime();
   const token = config.token;
   console.log(`[pi-web] telegram loop #${epoch} starting`);
-  try {
-    const me = await getMe(token);
-    console.log(`[pi-web] telegram loop #${epoch}: getMe ok (@${me.username})`);
-    current.info.botUsername = me.username;
-    current.info.lastError = null;
-    await registerCommands(token).catch(() => {});
-    console.log(`[pi-web] telegram loop #${epoch}: commands registered`);
-  } catch (error) {
-    console.warn(`[pi-web] telegram loop #${epoch}: startup failed: ${error instanceof Error ? error.message : String(error)}`);
-    current.info.running = false;
-    current.info.lastError = error instanceof Error ? error.message : String(error);
+  // Startup retries: a transient fetch failure at getMe must not kill the
+  // loop until the next manual resync.
+  let started = false;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (loop.cancelled || runtime().configEpoch !== epoch) return;
+    try {
+      const me = await getMe(token);
+      console.log(`[pi-web] telegram loop #${epoch}: getMe ok (@${me.username})`);
+      current.info.botUsername = me.username;
+      current.info.lastError = null;
+      await registerCommands(token).catch(() => {});
+      console.log(`[pi-web] telegram loop #${epoch}: commands registered`);
+      started = true;
+      break;
+    } catch (error) {
+      console.warn(`[pi-web] telegram loop #${epoch}: startup failed (attempt ${attempt + 1}): ${error instanceof Error ? error.message : String(error)}`);
+      current.info.lastError = error instanceof Error ? error.message : String(error);
+      await sleep(Math.min(30_000, 1_000 * 2 ** attempt));
+    }
+  }
+  if (!started) {
     if (current.loop === loop) current.loop = null;
     return;
   }
