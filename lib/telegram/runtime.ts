@@ -122,7 +122,7 @@ async function pollLoop(loop: LoopHandle, config: TelegramConfig, epoch: number)
     for (const update of updates) {
       if (loop.cancelled || runtime().configEpoch !== epoch) break;
       await persistOffset(update.update_id + 1);
-      await handleUpdate(token, config, update);
+      await handleUpdate(token, update);
     }
   }
   if (current.loop === loop) {
@@ -162,13 +162,17 @@ const HELP_TEXT = [
   "/status — is the current turn still running?",
 ].join("\n");
 
-async function handleUpdate(token: string, config: TelegramConfig, update: TelegramUpdate): Promise<void> {
+async function handleUpdate(token: string, update: TelegramUpdate): Promise<void> {
   const message = update.message ?? update.edited_message;
   if (!message || typeof message.text !== "string" || message.text.trim() === "") return;
   const chatId = message.chat.id;
   const title = message.chat.title
     ?? (message.chat.username ? `@${message.chat.username}` : null)
     ?? ([message.chat.first_name, message.chat.last_name].filter(Boolean).join(" ") || null);
+  // The allowlist and default cwd are read fresh per update: the loop's
+  // captured config predates Settings edits, and an allowlisted-here chat
+  // must never be ignored because the loop started before it was allowed.
+  const config = readTelegramConfig();
   if (!isAllowed(config, chatId)) {
     // Never answer an unapproved chat; only surface it for the pairing UI.
     await editTelegramState((state) => ({
