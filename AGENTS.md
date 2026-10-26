@@ -69,6 +69,8 @@ app/api/
   file-index/route.ts              GET file list for @-mentions
   git/status/route.ts              GET changed files for a cwd
   git/diff/route.ts                GET diff of one changed file
+  git/graph/route.ts               GET the git graph of a folder's history (lib/git-graph, allowed roots checked)
+  automations/route.ts             GET automations + recent runs | POST preview/create/update/delete/set-enabled/run-now (lib/automations/*)
   worktrees/route.ts               GET/POST/DELETE git worktrees
   terminal/route.ts                POST create a terminal session
   terminal/[id]/route.ts           GET { id, cwd } (404 once closed; stream at [id]/events) | POST input/resize | DELETE kill
@@ -105,7 +107,8 @@ lib/
   share-store.ts             pi-web-shares.json: one share per session, locked atomic writes, corrupt file set aside
   share-snapshot.ts          the frozen projection a share serves: active branch, inline media, 25 MB cap
   share-types.ts             client-safe share types and the share-code pattern
-  telegram/                  the Telegram channel: bot-api (fetch Bot API client), config-store (pi-web-channels.json + state, one section per channel, locked atomic writes, legacy pi-web-telegram.json migrated once), message-text (4096 chunking), session-bridge (chat↔pi session), runtime (long-poll singleton restarted with the config)
+  telegram/                  the Telegram channel: bot-api (fetch Bot API client), config-store (pi-web-channels.json + state, one section per channel, locked atomic writes, legacy pi-web-telegram.json migrated once), message-text (4096 chunking, Markdown→Telegram HTML), session-bridge (chat↔pi session), runtime (long-poll singleton restarted with the config)
+  automations/               scheduled tasks: cron-schedule (zero-dep wall-clock cron + tz, DST-safe), store (pi-web-automations.json: definitions + capped run history), runner (30s ticker singleton, fires isolated sessions, waits for prompt_done, skips when busy, no catch-up)
   agent-client.ts           typed fetch helper for /api/agent commands
   rpc-manager.ts            AgentSessionWrapper, registry, startRpcSession
   session-reader.ts         SessionManager wrappers, path cache, buildSessionContext adapter
@@ -191,6 +194,8 @@ lib/
   mcp-tool-display.ts       server/tool label of an mcp__ call from its result details, never the name
 
 components/
+  AutomationsConfig.tsx         Settings › Automations: task list with next-run badges, schedule editor (cron/every/at + live preview), prompt, history linking into each run's session
+  GitGraphPanel.tsx           the git graph tab's view (lib/git-graph-layout draws the lanes)
   ChannelsConfig.tsx            Settings › Channels: the shared split view; Telegram's pane: token (write-only, last-4 hint), enable switch, default cwd, chat allowlist with one-click pairing
   SharePanel.tsx             session row's Share menu body: disclosure, link, copy/refresh/stop
   SharedSessionView.tsx      the public /share/<code> page's read-only view (MessageView reused, passive props only)
