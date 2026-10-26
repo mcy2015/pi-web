@@ -1,6 +1,7 @@
 import { configureHttpDispatcher, readHttpIdleTimeoutMs } from "@/lib/http-dispatcher";
 import { closeAllAgentEventStreams } from "@/lib/agent-event-stream";
 import { syncTelegramRuntime } from "@/lib/telegram/runtime";
+import { syncAutomationsRuntime } from "@/lib/automations/runner";
 
 export function registerNodeInstrumentation(): void {
   // The pi CLI applies settings' `httpIdleTimeoutMs` to the same undici
@@ -29,4 +30,8 @@ export function registerNodeInstrumentation(): void {
   void syncTelegramRuntime().catch((error) => {
     console.warn(`[pi-web] starting the telegram runtime failed: ${error instanceof Error ? error.message : String(error)}`);
   });
+
+  // The Automations ticker likewise: it reads its schedule from disk and
+  // keeps itself in step from there.
+  syncAutomationsRuntime();
 }

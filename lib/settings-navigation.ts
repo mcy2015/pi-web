@@ -6,6 +6,7 @@ export const SETTINGS_SECTION_VALUES = [
   "plugins",
   "mcp",
   "channels",
+  "automations",
 ] as const;
 
 export type SettingsSection = (typeof SETTINGS_SECTION_VALUES)[number];
@@ -70,7 +71,7 @@ function selectionKey(section: SettingsDetailSection, cwd?: string | null): stri
   if (cwd) return JSON.stringify([section, cwd]);
   // MCP works without a project; its selection then lives under the bare name,
   // which no project key (always an array) can collide with.
-  return section === "mcp" || section === "channels" ? section : null;
+  return section === "mcp" || section === "channels" || section === "automations" ? section : null;
 }
 
 export function getLastSettingsSection(

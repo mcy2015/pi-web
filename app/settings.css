@@ -2635,3 +2635,54 @@ select.mcp-add-input {
   gap: 8px;
   margin-bottom: 8px;
 }
+
+/* Settings › Automations: the schedule editor's one-line control cluster
+   (kind select + per-kind inputs) and the prompt textarea. */
+.automations-schedule {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.automations-schedule select,
+.automations-schedule input {
+  height: 32px;
+}
+
+.automations-schedule .mcp-add-input {
+  width: 160px;
+  flex: 0 1 auto;
+}
+
+.automations-number-input {
+  width: 80px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+}
+
+.automations-datetime-input {
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+}
+
+.automations-prompt {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
