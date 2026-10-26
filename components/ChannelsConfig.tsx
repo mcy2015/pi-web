@@ -31,6 +31,7 @@ import {
   ConfigSidebarList,
   ConfigSidebarText,
   ConfigSplitView,
+  ConfigStatusDot,
   ConfigSwitch,
 } from "./SettingsUi";
 import type { TelegramStatus } from "@/lib/telegram/types";
@@ -38,6 +39,20 @@ import type { TelegramStatus } from "@/lib/telegram/types";
 interface StatusLine {
   kind: "ok" | "error" | "info";
   message: string;
+}
+
+/** The sidebar row's state, in the MCP rows' vocabulary. */
+function channelRowState(status: TelegramStatus): { tone: "on" | "off" | "error"; badge: string } {
+  if (!status.config.tokenSet) return { tone: "off", badge: "channels.badge.unconfigured" };
+  if (!status.config.enabled) return { tone: "off", badge: "channels.badge.off" };
+  if (status.lastError) return { tone: "error", badge: "channels.badge.error" };
+  return { tone: "on", badge: "channels.badge.on" };
+}
+
+function statusDot(tone: "on" | "off" | "error"): { active?: boolean; color?: string } {
+  if (tone === "on") return { active: true };
+  if (tone === "off") return { active: false };
+  return { color: "#ef4444" };
 }
 
 async function postChannels(body: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
@@ -118,14 +133,21 @@ export function ChannelsConfig({ embedded = true, onClose }: { embedded?: boolea
             ) : (
               <div className="config-sidebar-group">
                 <ConfigSidebarGroupLabel>{t("channels.group")}</ConfigSidebarGroupLabel>
-                <ConfigSidebarItem active>
-                  <span className="config-sidebar-item-name">Telegram</span>
-                  <ConfigSidebarText className="is-dim">
-                    {status.running
-                      ? t("telegram.connectedShort", { bot: status.botUsername ?? "" })
-                      : t("telegram.notConnectedShort")}
-                  </ConfigSidebarText>
-                </ConfigSidebarItem>
+                {(() => {
+                  const row = channelRowState(status);
+                  return (
+                    <ConfigSidebarItem
+                      active
+                      aria-label={`Telegram — ${t(row.badge)}`}
+                    >
+                      <ConfigStatusDot {...statusDot(row.tone)} />
+                      <ConfigSidebarText className="is-grow">Telegram</ConfigSidebarText>
+                      <span className={`mcp-sidebar-badge${row.tone === "error" ? " is-error" : ""}`}>
+                        {t(row.badge)}
+                      </span>
+                    </ConfigSidebarItem>
+                  );
+                })()}
               </div>
             )}
           </ConfigSidebarList>
@@ -143,9 +165,8 @@ export function ChannelsConfig({ embedded = true, onClose }: { embedded?: boolea
                 )}
 
                 <ConfigDetailHeader>
-                  <ConfigDetailTitle>Telegram</ConfigDetailTitle>
                   <ConfigDetailHeaderInfo>
-                    {t("telegram.connectionDescription")}
+                    <ConfigDetailTitle>Telegram</ConfigDetailTitle>
                   </ConfigDetailHeaderInfo>
                   <ConfigDetailActions>
                     <ConfigSwitch
@@ -156,6 +177,10 @@ export function ChannelsConfig({ embedded = true, onClose }: { embedded?: boolea
                     />
                   </ConfigDetailActions>
                 </ConfigDetailHeader>
+
+                {!config.tokenSet && (
+                  <ConfigNotice>{t("telegram.setupHint")}</ConfigNotice>
+                )}
 
                 <ConfigDetailGrid>
                   <ConfigDetailGridRow label={t("telegram.botStatus")}>
