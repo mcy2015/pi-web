@@ -16,6 +16,7 @@ import {
   deleteMessage,
   answerCallbackQuery,
   downloadFile,
+  TelegramApiError,
   type InlineButton,
   type TelegramUpdate,
   type TelegramMessage,
@@ -28,7 +29,7 @@ import {
   type TelegramConfig,
 } from "./config-store";
 import { resetChatSession, runChatTurn, withChatWrapper, type TelegramUiRequest, type TurnImage, type TurnInput } from "./session-bridge";
-import { splitForTelegram, TELEGRAM_MESSAGE_LIMIT } from "./message-text";
+import { splitForTelegram, markdownToTelegramHtml, TELEGRAM_MESSAGE_LIMIT } from "./message-text";
 import type { TelegramStatus } from "./types";
 import { getRpcSession } from "@/lib/rpc-manager";
 
@@ -180,10 +181,23 @@ function isAllowed(config: TelegramConfig, chatId: number): boolean {
   return config.allowedChats.some((chat) => chat.id === chatId);
 }
 
+/** One chunk as Telegram HTML, falling back to plain text when Telegram rejects it. */
+async function sendChunk(token: string, chatId: number, chunk: string): Promise<void> {
+  try {
+    await sendMessage(token, chatId, markdownToTelegramHtml(chunk), { parseMode: "HTML" });
+  } catch (error) {
+    if (error instanceof TelegramApiError && error.statusCode === 400) {
+      await sendMessage(token, chatId, chunk);
+      return;
+    }
+    throw error;
+  }
+}
+
 async function reply(token: string, chatId: number, text: string): Promise<void> {
   for (const chunk of splitForTelegram(text)) {
     try {
-      await sendMessage(token, chatId, chunk);
+      await sendChunk(token, chatId, chunk);
     } catch (error) {
       console.warn(`[pi-web] telegram chat ${chatId}: sending a reply failed: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -239,10 +253,22 @@ async function editPreview(token: string, chatId: number, text: string): Promise
   const preview = previewOf(chatId);
   if (preview.messageId === null) return;
   try {
-    await editMessageText(token, chatId, preview.messageId, text);
+    await editMessageText(token, chatId, preview.messageId, markdownToTelegramHtml(text), { parseMode: "HTML" });
     preview.lastEditAt = Date.now();
     preview.lastLen = text.length;
   } catch (error) {
+    if (error instanceof TelegramApiError && error.statusCode === 400) {
+      // Ill-formed HTML (or a tag split by truncation): the plain text still
+      // shows the content; the next edit or the final reply replaces it.
+      try {
+        await editMessageText(token, chatId, preview.messageId, text);
+        preview.lastEditAt = Date.now();
+        preview.lastLen = text.length;
+      } catch {
+        // Leave the previous preview; the final reply still arrives.
+      }
+      return;
+    }
     console.warn(`[pi-web] telegram chat ${chatId}: editing the preview failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }

@@ -110,13 +110,15 @@ export async function sendMessage(
   token: string,
   chatId: number,
   text: string,
-  options: { replyMarkup?: { inline_keyboard: InlineButton[][] }; replyToMessageId?: number } = {},
+  options: { parseMode?: "HTML"; replyMarkup?: { inline_keyboard: InlineButton[][] }; replyToMessageId?: number } = {},
 ): Promise<TelegramMessage> {
   return call(token, "sendMessage", {
     chat_id: chatId,
-    // Plain text: Telegram's Markdown dialects reject more than they accept,
-    // and a formatting error would drop the whole reply.
+    // Plain text unless a parseMode is given: Telegram's Markdown dialects
+    // reject more than they accept, and a formatting error would drop the
+    // whole reply.
     text,
+    ...(options.parseMode ? { parse_mode: options.parseMode } : {}),
     ...(options.replyToMessageId !== undefined ? { reply_to_message_id: options.replyToMessageId } : {}),
     ...(options.replyMarkup !== undefined ? { reply_markup: options.replyMarkup } : {}),
     link_preview_options: { is_disabled: true },
@@ -128,11 +130,13 @@ export async function editMessageText(
   chatId: number,
   messageId: number,
   text: string,
+  options: { parseMode?: "HTML" } = {},
 ): Promise<void> {
   await call(token, "editMessageText", {
     chat_id: chatId,
     message_id: messageId,
     text,
+    ...(options.parseMode ? { parse_mode: options.parseMode } : {}),
     link_preview_options: { is_disabled: true },
   });
 }
