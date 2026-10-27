@@ -32,3 +32,14 @@ export function isApplyPatchToolName(toolName: string): boolean {
     name.endsWith(".apply_patch") ||
     name.endsWith("_apply_patch");
 }
+
+/** Shell tools whose command text is the only record of what they touched. */
+export function isBashToolName(toolName: string): boolean {
+  const name = toolName.toLowerCase();
+  return name === "bash" ||
+    name === "shell" ||
+    name === "run_command" ||
+    name === "execute_command" ||
+    name.endsWith(".bash") ||
+    name.endsWith("_bash");
+}

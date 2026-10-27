@@ -19,6 +19,7 @@ import { checkModelSelector } from "./model-selector.mjs";
 import { checkFilesPlacement, showSidebarSessions } from "./sidebar.mjs";
 import { checkSessionNavigation } from "./session-navigation.mjs";
 import { checkSubagentCard } from "./subagent-card.mjs";
+import { checkWrittenFiles } from "./written-files.mjs";
 import { checkProjectNavigation, createProjectNavigationFixtures } from "./project-navigation.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -43,6 +44,8 @@ const APPEND = "e2e-external-append-session";
 const CODE_BACKGROUND = "e2e-code-background";
 const SUBAGENT_PARENT = "e2e-subagent-parent";
 const SUBAGENT_CHILD = "e2e-subagent-child";
+const WRITTEN = "e2e-written-files";
+const WRITTEN_CHILD = "e2e-written-child";
 const text = (i) => `E2E message ${String(i).padStart(4, "0")}`;
 const ids = (start, end) => Array.from({ length: end - start }, (_, i) => `e${start + i}`);
 
@@ -182,6 +185,63 @@ try {
   writeFileSync(join(sessionDir, `2026-08-23T00-00-00-000Z_${SUBAGENT_CHILD}.jsonl`),
     [{ type: "session", version: 3, id: SUBAGENT_CHILD, timestamp, cwd: project, parentSession: parentPath }, ...childEntries]
       .map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+  // A turn that writes files four ways: a direct write, a bash command parsed
+  // for its writes, a codemode script's nested write, and a settled subagent
+  // whose own transcript holds the fourth write.
+  const writtenResult = (id, extra) => {
+    const result = message(`wresult-${id}`, `wcall-${id}`, "toolResult", [{ type: "text", text: `E2E ${id} output` }]);
+    Object.assign(result.message, { toolCallId: id, toolName: id === "w1" ? "write" : id === "w2" ? "bash" : id === "w3" ? "codemode" : "Agent", isError: false });
+    if (extra) Object.assign(result.message, extra);
+    return result;
+  };
+  const subagentDetails = {
+    kind: "pi-web-subagent",
+    sessionId: WRITTEN_CHILD,
+    profile: "general-purpose",
+    description: "E2E written-files worker",
+    status: "completed",
+    runInBackground: false,
+    createdAt: timestamp,
+    completedAt: timestamp,
+  };
+  writeSession(WRITTEN, [
+    message("wuser", null, "user", "E2E write files"),
+    message("wcall-w1", "wuser", "assistant", [
+      { type: "toolCall", id: "w1", name: "write", arguments: { path: "src/direct.txt", content: "direct" } },
+    ]),
+    writtenResult("w1"),
+    message("wcall-w2", "wresult-w1", "assistant", [
+      { type: "toolCall", id: "w2", name: "bash", arguments: { command: "sed -i 's/a/b/' lib/via-bash.ts" } },
+    ]),
+    writtenResult("w2"),
+    message("wcall-w3", "wresult-w2", "assistant", [
+      { type: "toolCall", id: "w3", name: "codemode", arguments: { code: "await tools.write({ path: 'src/via-codemode.ts', content: 'x' })" } },
+    ]),
+    writtenResult("w3", { details: { calls: [
+      { id: "n1", name: "write", args: '{"path":"src/via-codemode.ts","content":"x"}', status: "ok" },
+    ] } }),
+    message("wcall-w4", "wresult-w3", "assistant", [
+      { type: "toolCall", id: "w4", name: "Agent", arguments: { subagent_type: "general-purpose", prompt: "E2E written-files task", description: "E2E written-files worker" } },
+    ]),
+    writtenResult("w4", { details: subagentDetails }),
+    message("wanswer", "wresult-w4", "assistant", [{ type: "text", text: "E2E written-files answer" }]),
+  ]);
+  const writtenParentPath = join(sessionDir, `2026-08-23T00-00-00-000Z_${WRITTEN}.jsonl`);
+  const writtenChildWriteResult = message("wc3", "wc2", "toolResult", [{ type: "text", text: "E2E child write output" }]);
+  Object.assign(writtenChildWriteResult.message, { toolCallId: "cw1", toolName: "write", isError: false });
+  const writtenChildEntries = [
+    { type: "custom", id: "wmeta", parentId: null, timestamp, customType: "pi-web:subagent", data: { version: 1, parentSessionId: WRITTEN, parentSessionPath: writtenParentPath, profile: "general-purpose", description: "E2E written-files worker", task: "E2E written-files task", runInBackground: false, createdAt: timestamp } },
+    message("wc1", null, "user", "E2E written-files task assigned"),
+    message("wc2", "wc1", "assistant", [
+      { type: "toolCall", id: "cw1", name: "write", arguments: { path: "src/via-subagent.ts", content: "child" } },
+    ]),
+    writtenChildWriteResult,
+    message("wc4", "wc3", "assistant", [{ type: "text", text: "E2E written-files child reply" }]),
+    { type: "custom", id: "wdone", parentId: "wc4", timestamp, customType: "pi-web:subagent-result", data: { status: "completed", completedAt: timestamp, content: "E2E written-files child finished" } },
+  ];
+  writeFileSync(join(sessionDir, `2026-08-23T00-00-00-000Z_${WRITTEN_CHILD}.jsonl`),
+    [{ type: "session", version: 3, id: WRITTEN_CHILD, timestamp, cwd: project, parentSession: writtenParentPath }, ...writtenChildEntries]
+      .map((entry) => JSON.stringify(entry)).join("\n") + "\n");
   writeSession(APPEND, [
     message("root", null, "user", "E2E wrapper root"),
     message("reply", "root", "assistant", "E2E wrapper reply"),
@@ -229,7 +289,7 @@ try {
     const response = await fetch(`${base}/api/sessions`, { signal: AbortSignal.timeout(5000) }).catch(() => null);
     if (response?.ok) {
       const { sessions } = await response.json();
-      assert.deepEqual(sessions.map((session) => session.id).sort(), [LONG, BRANCH, RICH, COMPACTED, APPEND, CODE_BACKGROUND, SUBAGENT_PARENT, SUBAGENT_CHILD, projectNavigation.id].sort());
+      assert.deepEqual(sessions.map((session) => session.id).sort(), [LONG, BRANCH, RICH, COMPACTED, APPEND, CODE_BACKGROUND, SUBAGENT_PARENT, SUBAGENT_CHILD, WRITTEN, WRITTEN_CHILD, projectNavigation.id].sort());
       break;
     }
     assert.ok(Date.now() < deadline, "Server readiness timed out; see server.log");
@@ -577,6 +637,7 @@ try {
   await checkProjectNavigation({ browser, base, artifacts, fixture: projectNavigation, otherSessionId: BRANCH, api, post });
   // Last of all in its own context: the Agent card's subagent entries.
   await checkSubagentCard({ browser, base, artifacts, parent: SUBAGENT_PARENT, child: SUBAGENT_CHILD });
+  await checkWrittenFiles({ browser, base, artifacts, session: WRITTEN });
 } catch (error) {
   console.error(error);
   process.exitCode = 1;

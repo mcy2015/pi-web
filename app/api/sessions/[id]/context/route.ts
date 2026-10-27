@@ -46,7 +46,13 @@ export async function GET(
       sessionId: id,
     }), transcriptNotices);
 
-    return NextResponse.json({ context, tail, before: before ?? null });
+    return NextResponse.json({
+      context,
+      tail,
+      before: before ?? null,
+      // The child's cwd: a worktree subagent writes paths of its own checkout.
+      cwd: sm.getHeader()?.cwd ?? null,
+    });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }

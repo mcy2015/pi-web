@@ -32,3 +32,25 @@ test("renders a button per file showing the basename and full path", () => {
 test("renders nothing when no files were written", () => {
   assert.equal(render({ files: [], onOpenFile() {} }), "");
 });
+
+test("renders +/− counts per file when git stats are cached for the cwd", async () => {
+  const { setGitFileStatsForTests } = await jiti.import("@/hooks/useGitFileStats");
+  setGitFileStatsForTests("/abs", new Map([
+    ["/abs/out/report.html", { additions: 12, deletions: 3 }],
+    ["/abs/out/data.json", { additions: 0, deletions: 0 }],
+  ]));
+  const html = render({
+    files: [{ filePath: "/abs/out/report.html" }, { filePath: "/abs/out/data.json" }],
+    onOpenFile() {},
+    cwd: "/abs",
+  });
+  assert.match(html, /\+12/);
+  assert.match(html, /−3/);
+  // A file with no changed lines shows no badge, as one outside git.
+  assert.doesNotMatch(html, /\+0/);
+});
+
+test("renders no badge without a cwd", () => {
+  const html = render({ files: [{ filePath: "/abs/out/report.html" }], onOpenFile() {} });
+  assert.doesNotMatch(html, /\+/);
+});

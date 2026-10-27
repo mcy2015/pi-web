@@ -1,6 +1,8 @@
 import type { AssistantContentBlock, ToolResultMessage } from "./types";
 import { resolveLocalFilePath } from "./file-links";
-import { isApplyPatchToolName, isEditToolName, isWriteToolName } from "./tool-names";
+import { isApplyPatchToolName, isBashToolName, isEditToolName, isWriteToolName } from "./tool-names";
+import { extractBashWrittenPaths } from "./bash-written-files";
+import { CODEMODE_TOOL_NAME, codemodeCalls } from "./codemode-view";
 import {
   applyPatchPreviewToFiles,
   applyPatchResultHasFailures,
@@ -23,6 +25,42 @@ function readToolPath(input: Record<string, unknown> | undefined): string | null
   if (!input) return null;
   const value = input.file_path ?? input.path;
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+/** A shell tool's command text, whichever key it arrived under. */
+function readBashCommand(input: Record<string, unknown> | undefined): string | null {
+  if (!input) return null;
+  const value = input.command ?? input.cmd ?? input.script;
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+/** Unescape the JSON string escapes a regex had to leave in place. */
+function unescapeJsonishString(value: string): string {
+  return value.replace(/\\(.)/g, (_, escaped: string) => {
+    if (escaped === "n") return "\n";
+    if (escaped === "t") return "\t";
+    if (escaped === "r") return "\r";
+    return escaped;
+  });
+}
+
+/**
+ * The path a codemode script's nested `write`/`edit` call touched. The SDK
+ * records each nested call's arguments as compact JSON, truncated for long
+ * payloads — when the JSON no longer parses, the leading `"path":` key is
+ * read directly; when even that was cut away the call is unknowable.
+ */
+function readNestedCallPath(args: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(args);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return readToolPath(parsed as Record<string, unknown>);
+    }
+    return null;
+  } catch {
+    const match = args.match(/"(?:file_path|path)"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    return match ? unescapeJsonishString(match[1]) : null;
+  }
 }
 
 function writtenPathsFromFiles(files: SplitDiffFile[] | null): string[] {
@@ -80,13 +118,33 @@ function readApplyPatchPaths(input: Record<string, unknown> | undefined, result:
 }
 
 /**
+ * Collect the paths a codemode script actually wrote, from the nested call
+ * log its result carries (`details.calls`). Those calls never reach the model
+ * as tool calls of their own, so this is the only record of them. Calls the
+ * SDK left out (`omittedCalls`) are unknowable and go unlisted.
+ */
+function readCodemodeWrittenPaths(result: ToolResultMessage | undefined): string[] {
+  const { calls } = codemodeCalls(result?.details);
+  const paths: string[] = [];
+  for (const call of calls) {
+    if (call.status !== "ok") continue;
+    if (!isWriteToolName(call.name) && !isEditToolName(call.name)) continue;
+    const path = readNestedCallPath(call.args);
+    if (path) paths.push(path);
+  }
+  return paths;
+}
+
+/**
  * Collect the distinct files a single assistant turn actually wrote.
  *
  * Every entry is derived from a `write`/`edit`/`apply_patch` tool call whose
  * result arrived and did not error — never from the reply text. A path the
  * assistant merely mentions in prose is not evidence that any file was
  * touched, so it is not a source here; the tool call is the record of what
- * happened.
+ * happened. Two weaker records join them, both still result-gated: the
+ * nested `write`/`edit` calls of a `codemode` script, and the paths a
+ * `bash` command writes (redirects, `sed -i`, `mv`, … — parsed, so a guess).
  *
  * Paths are resolved against `cwd`, deduped, and kept in first-seen order.
  */
@@ -98,28 +156,39 @@ export function extractTurnWrittenFiles(
   const seen = new Set<string>();
   const writtenFiles: WrittenFile[] = [];
 
+  const addPath = (rawPath: string) => {
+    // Tool arguments are filesystem paths, not hrefs: preserve characters such
+    // as #, ?, and :digits that have special meaning in links and source refs.
+    const filePath = resolveLocalFilePath(rawPath, cwd);
+    if (!filePath) return;
+
+    if (seen.has(filePath)) return;
+    seen.add(filePath);
+    writtenFiles.push({ filePath });
+  };
+
   for (const block of content) {
     if (block.type !== "toolCall") continue;
-    if (!isFileWritingToolName(block.toolName) && !isApplyPatchToolName(block.toolName)) continue;
+    if (!isFileWritingToolName(block.toolName) && !isApplyPatchToolName(block.toolName)
+      && !isBashToolName(block.toolName) && block.toolName !== CODEMODE_TOOL_NAME) continue;
 
     const result = toolResults?.get(block.toolCallId);
     if (!result || result.isError) continue;
 
-    const rawPaths = isApplyPatchToolName(block.toolName)
-      ? readApplyPatchPaths(block.input, result)
-      : [readToolPath(block.input)];
+    let rawPaths: (string | null | undefined)[];
+    if (isApplyPatchToolName(block.toolName)) {
+      rawPaths = readApplyPatchPaths(block.input, result);
+    } else if (isBashToolName(block.toolName)) {
+      const command = readBashCommand(block.input);
+      rawPaths = command ? extractBashWrittenPaths(command) : [];
+    } else if (block.toolName === CODEMODE_TOOL_NAME) {
+      rawPaths = readCodemodeWrittenPaths(result);
+    } else {
+      rawPaths = [readToolPath(block.input)];
+    }
 
     for (const rawPath of rawPaths) {
-      if (!rawPath) continue;
-
-      // Tool arguments are filesystem paths, not hrefs: preserve characters such
-      // as #, ?, and :digits that have special meaning in links and source refs.
-      const filePath = resolveLocalFilePath(rawPath, cwd);
-      if (!filePath) continue;
-
-      if (seen.has(filePath)) continue;
-      seen.add(filePath);
-      writtenFiles.push({ filePath });
+      if (rawPath) addPath(rawPath);
     }
   }
 

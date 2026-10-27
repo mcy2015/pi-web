@@ -34,6 +34,36 @@ export function parseGitPorcelainV1(output: string): GitPorcelainEntry[] {
   return entries;
 }
 
+export interface GitNumstatEntry {
+  /** Absolute when `repositoryRoot` was passed to the parser; `-` counts as 0. */
+  path: string;
+  additions: number;
+  deletions: number;
+  /** True for a rename's combined `old => new` row, which maps to no one file. */
+  renamed: boolean;
+}
+
+/** Parse `git diff --numstat` output; rename rows keep their raw combined path. */
+export function parseGitNumstat(output: string, repositoryRoot?: string): GitNumstatEntry[] {
+  const entries: GitNumstatEntry[] = [];
+  for (const line of output.split(/\r?\n/)) {
+    if (!line) continue;
+    const [added, deleted, ...pathParts] = line.split("\t");
+    if (pathParts.length === 0) continue;
+    const rawPath = pathParts.join("\t");
+    const additions = added === "-" ? 0 : Number(added);
+    const deletions = deleted === "-" ? 0 : Number(deleted);
+    if (!Number.isInteger(additions) || !Number.isInteger(deletions)) continue;
+    entries.push({
+      path: repositoryRoot ? `${repositoryRoot.replace(/\/+$/, "")}/${rawPath}` : rawPath,
+      additions,
+      deletions,
+      renamed: /=>/.test(rawPath),
+    });
+  }
+  return entries;
+}
+
 const CONFLICT_STATUSES = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
 
 export function classifyGitStatus(entry: GitPorcelainEntry): Pick<GitFileStatus, "status" | "code"> {

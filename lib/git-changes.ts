@@ -10,6 +10,7 @@ import type {
 } from "./git-types";
 import {
   classifyGitStatus,
+  parseGitNumstat,
   parseGitPorcelainV1,
   type GitPorcelainEntry,
 } from "./git-status";
@@ -58,12 +59,15 @@ async function readStatusEntries(
   return parseGitPorcelainV1(output);
 }
 
-async function readTrackedLineStats(
+async function readTrackedFileLineStats(
   repositoryRoot: string,
   cwd: string,
-): Promise<{ additions: number; deletions: number }> {
+): Promise<{ additions: number; deletions: number; byPath: Map<string, { additions: number; deletions: number }> }> {
   const relativeCwd = toGitPath(path.relative(repositoryRoot, cwd));
   const pathspec = relativeCwd || ".";
+  const byPath = new Map<string, { additions: number; deletions: number }>();
+  let additions = 0;
+  let deletions = 0;
   try {
     const output = await git(repositoryRoot, [
       "diff",
@@ -74,19 +78,18 @@ async function readTrackedLineStats(
       "--",
       pathspec,
     ]);
-    let additions = 0;
-    let deletions = 0;
-    for (const line of output.split(/\r?\n/)) {
-      if (!line) continue;
-      const [added, deleted] = line.split("\t", 2);
-      const addedCount = Number(added);
-      const deletedCount = Number(deleted);
-      if (Number.isInteger(addedCount)) additions += addedCount;
-      if (Number.isInteger(deletedCount)) deletions += deletedCount;
+    for (const entry of parseGitNumstat(output, repositoryRoot)) {
+      // Totals keep counting rename rows, as they always did; per-file stats
+      // cannot say which side of the rename a row belongs to.
+      additions += entry.additions;
+      deletions += entry.deletions;
+      if (!entry.renamed && !byPath.has(entry.path)) {
+        byPath.set(entry.path, { additions: entry.additions, deletions: entry.deletions });
+      }
     }
-    return { additions, deletions };
+    return { additions, deletions, byPath };
   } catch {
-    return { additions: 0, deletions: 0 };
+    return { additions: 0, deletions: 0, byPath };
   }
 }
 
@@ -115,10 +118,11 @@ export async function getGitStatus(cwd: string): Promise<GitStatusResponse> {
     };
   }
 
-  const [entries, trackedLineStats] = await Promise.all([
+  const [entries, trackedStats] = await Promise.all([
     readStatusEntries(repositoryRoot),
-    readTrackedLineStats(repositoryRoot, cwd),
+    readTrackedFileLineStats(repositoryRoot, cwd),
   ]);
+  let untrackedAdditions = 0;
   const files = entries.flatMap((entry): GitFileStatus[] => {
     const filePath = path.resolve(repositoryRoot, entry.path);
     if (!isWithinPath(cwd, filePath)) return [];
@@ -126,25 +130,35 @@ export async function getGitStatus(cwd: string): Promise<GitStatusResponse> {
     const originalPath = entry.originalPath
       ? path.resolve(repositoryRoot, entry.originalPath)
       : undefined;
+    if (classified.status === "untracked") {
+      const additions = countUntrackedTextLines(filePath);
+      untrackedAdditions += additions;
+      return [{
+        filePath,
+        ...classified,
+        indexStatus: entry.indexStatus,
+        worktreeStatus: entry.worktreeStatus,
+        additions,
+        ...(originalPath && originalPath !== filePath ? { originalPath } : {}),
+      }];
+    }
+    const stats = trackedStats.byPath.get(filePath);
     return [{
       filePath,
       ...classified,
       indexStatus: entry.indexStatus,
       worktreeStatus: entry.worktreeStatus,
+      ...(stats ? { additions: stats.additions, deletions: stats.deletions } : {}),
       ...(originalPath && originalPath !== filePath ? { originalPath } : {}),
     }];
   });
-  const untrackedAdditions = files.reduce(
-    (total, file) => total + (file.status === "untracked" ? countUntrackedTextLines(file.filePath) : 0),
-    0,
-  );
 
   return {
     isGitRepository: true,
     repositoryRoot,
     files,
-    additions: trackedLineStats.additions + untrackedAdditions,
-    deletions: trackedLineStats.deletions,
+    additions: trackedStats.additions + untrackedAdditions,
+    deletions: trackedStats.deletions,
   };
 }
 

@@ -12,6 +12,11 @@ export interface GitFileStatus {
   code: "M" | "A" | "D" | "R" | "U" | "C";
   indexStatus: string;
   worktreeStatus: string;
+  /** This file's changed lines vs HEAD, when git reported them (renames and
+   *  binary files report none). Untracked files carry their line count as
+   *  additions. Optional so older snapshots stay readable. */
+  additions?: number;
+  deletions?: number;
   /** A rename's or copy's source path, when Git reported one. Committing the
    *  entry needs both sides, or the old name's deletion stays behind. */
   originalPath?: string;

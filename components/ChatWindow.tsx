@@ -10,6 +10,7 @@ import { EXTENSION_DIALOG_BASE_WIDTH, fitExtensionDialogWidth } from "@/lib/exte
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
 import { collapsesProcessDetails, countToolCallBlocks, getDisplayableAssistantBlocks, hasAssistantAnswer, isHiddenCustomMessage, isMessageGroupAnchor, splitFinalAssistantBlocks } from "@/lib/message-display";
 import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
+import { collectSubagentSources } from "@/lib/subagent-written-files";
 import { getFinalAnswerViews, keepWrittenFiles, type FinalAnswerViews } from "@/lib/turn-views";
 import { formatTurnDuration, getTurnDurationMs } from "@/lib/turn-duration";
 import { buildQuotedSelection } from "@/lib/quoted-selection";
@@ -27,6 +28,7 @@ import { selectHasStreamingContent, selectIsStreaming, selectStreamingMessage, u
 import type { StreamingStore } from "@/lib/streaming-message";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useSubagentWrittenFiles } from "@/hooks/useSubagentWrittenFiles";
 import { useScrollbarVisibility } from "@/hooks/useScrollbarVisibility";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { AppUpdateResponse } from "@/lib/api-types";
@@ -844,6 +846,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   const isEmptyNew = isNew && messages.length === 0 && !isStreaming && !sessionBusy;
   useScrollbarVisibility(scrollContainerRef, Boolean(session?.id) || !isEmptyNew);
   const messageCwd = session?.cwd ?? newSessionCwd ?? undefined;
+  const subagentWrittenFiles = useSubagentWrittenFiles(messages, toolResultsMap, messageCwd);
   const promptAnchorSpacerRef = useRef<HTMLDivElement | null>(null);
   const promptAnchorSpacerHeightRef = useRef(0);
   const promptAnchorMeasureFrameRef = useRef<number | null>(null);
@@ -1306,7 +1309,15 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                       for (const b of (m as AssistantMessage).content ?? []) turnContent.push(b);
                     }
                   }
-                  const writtenFiles = keepWrittenFiles(finalViews, extractTurnWrittenFiles(turnContent, toolResultsMap, messageCwd));
+                  const turnFiles = extractTurnWrittenFiles(turnContent, toolResultsMap, messageCwd);
+                  // A subagent's writes live in its own transcript; the parent
+                  // turn shows only its subagent call, so merge the child's list in.
+                  for (const source of collectSubagentSources(messages.slice(userIdx + 1, finalAssistantIdx + 1), toolResultsMap)) {
+                    for (const file of subagentWrittenFiles.get(source.sessionId) ?? []) {
+                      if (!turnFiles.some((existing) => existing.filePath === file.filePath)) turnFiles.push(file);
+                    }
+                  }
+                  const writtenFiles = keepWrittenFiles(finalViews, turnFiles);
                   rendered.push(renderMessage(finalAssistantIdx, {
                     messageOverride: finalAnswerMessage,
                     writtenFiles,
