@@ -69,6 +69,7 @@ app/api/
   file-index/route.ts              GET file list for @-mentions
   git/status/route.ts              GET changed files for a cwd
   git/diff/route.ts                GET diff of one changed file
+  git/commit/route.ts              POST commit selected changed files, optionally push (fork-local; lib/git-commit)
   git/graph/route.ts               GET the git graph of a folder's history (lib/git-graph, allowed roots checked)
   automations/route.ts             GET automations + recent runs (with the Telegram picklist) | POST preview/create/update/delete/set-enabled/run-now (lib/automations/*)
   worktrees/route.ts               GET/POST/DELETE git worktrees

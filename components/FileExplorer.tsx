@@ -11,7 +11,7 @@ import {
   joinFilePath,
   normalizeFilePathSlashes,
 } from "@/lib/file-paths";
-import type { GitFileStatus, GitFileStatusKind, GitStatusResponse } from "@/lib/git-types";
+import type { GitCommitResponse, GitFileStatus, GitFileStatusKind, GitStatusResponse } from "@/lib/git-types";
 import type { FileIndexEntry } from "@/lib/file-fuzzy";
 import { uploadFiles, type DroppedItem, type UploadConflictStrategy, type UploadError, type UploadResponse } from "@/lib/file-upload-client";
 import { buildSearchTree, type SearchTreeNode } from "@/lib/search-tree";
@@ -132,6 +132,17 @@ async function fetchGitStatus(cwd: string): Promise<GitStatusResponse> {
   const res = await fetch(`/api/git/status?${params.toString()}`);
   if (!res.ok) throw new Error(`Failed to load Git status (HTTP ${res.status})`);
   return res.json() as Promise<GitStatusResponse>;
+}
+
+function commitFailureText(kind: string | undefined, error: string | undefined, t: Translate): string {
+  switch (kind) {
+    case "empty-message": return t("files.commitErrorEmptyMessage");
+    case "no-files": return t("files.commitNoFilesSelected");
+    case "no-repository": return t("files.commitErrorNoRepository");
+    case "outside-repository": return t("files.commitErrorOutside");
+    case "nothing-to-commit": return t("files.commitErrorNothing");
+    default: return error?.trim() || t("files.commitErrorGeneric");
+  }
 }
 
 const GIT_STATUS_KEYS: Record<GitFileStatusKind, string> = {
@@ -616,12 +627,17 @@ function ChangeRow({
   cwd,
   onOpenFile,
   onAtMention,
+  checked,
+  onToggleSelected,
   t,
 }: {
   status: GitFileStatus;
   cwd: string;
   onOpenFile: OpenFileHandler;
   onAtMention?: (relativePath: string, isDir: boolean) => void;
+  /** Set while the commit form is open: the row carries a checkbox. */
+  checked?: boolean;
+  onToggleSelected?: (selected: boolean) => void;
   t: Translate;
 }) {
   const [hovered, setHovered] = useState(false);
@@ -641,7 +657,7 @@ function ChangeRow({
         display: "flex",
         alignItems: "center",
         gap: 6,
-        paddingLeft: 10,
+        paddingLeft: onToggleSelected ? 6 : 10,
         paddingRight: 8,
         height: 24,
         cursor: "pointer",
@@ -651,6 +667,17 @@ function ChangeRow({
         position: "relative",
       }}
     >
+      {onToggleSelected && (
+        <input
+          type="checkbox"
+          checked={checked}
+          onClick={(event) => event.stopPropagation()}
+          onChange={(event) => onToggleSelected(event.target.checked)}
+          title={t("files.commitToggleFile")}
+          aria-label={t("files.commitToggleFile")}
+          style={{ flexShrink: 0, width: 13, height: 13, margin: 0, accentColor: "var(--accent)", cursor: "pointer" }}
+        />
+      )}
       <GitStatusBadge status={status} t={t} />
       <span style={{ flexShrink: 0, display: "flex", alignItems: "center", opacity: 0.85 }}>
         {getFileIcon(name, 13)}
@@ -750,6 +777,14 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const [highlightedPaths, setHighlightedPaths] = useState<Set<string>>(new Set());
   const [gitFiles, setGitFiles] = useState<GitFileStatus[]>([]);
   const [gitLineStats, setGitLineStats] = useState({ additions: 0, deletions: 0 });
+  const [commitOpen, setCommitOpen] = useState(false);
+  const [commitMessage, setCommitMessage] = useState("");
+  const [commitPush, setCommitPush] = useState(false);
+  const [commitBusy, setCommitBusy] = useState(false);
+  const [commitError, setCommitError] = useState<string | null>(null);
+  const [commitSuccess, setCommitSuccess] = useState<{ commit: string; pushed: boolean; pushError?: string } | null>(null);
+  // Unchecking a row opts it out; files newly appearing stay selected.
+  const [deselectedPaths, setDeselectedPaths] = useState<Set<string>>(new Set());
   const [uploadPhase, setUploadPhase] = useState<UploadPhase>("idle");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -1097,6 +1132,66 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     onChangesCountChange?.(gitFiles.length);
   }, [gitFiles, onChangesCountChange]);
 
+  const selectedChangeFiles = useMemo(
+    () => gitFiles.filter((status) => !deselectedPaths.has(status.filePath)),
+    [gitFiles, deselectedPaths],
+  );
+
+  const toggleChangeSelected = useCallback((filePath: string, selected: boolean) => {
+    setDeselectedPaths((prev) => {
+      const next = new Set(prev);
+      if (selected) next.delete(filePath);
+      else next.add(filePath);
+      return next;
+    });
+  }, []);
+
+  const submitCommit = useCallback(async () => {
+    if (commitBusy) return;
+    if (selectedChangeFiles.length === 0) {
+      setCommitError(t("files.commitNoFilesSelected"));
+      return;
+    }
+    // A rename's two sides travel together, or the old name's deletion stays.
+    const paths = selectedChangeFiles.flatMap((status) =>
+      status.originalPath ? [status.filePath, status.originalPath] : [status.filePath]);
+    setCommitBusy(true);
+    setCommitError(null);
+    setCommitSuccess(null);
+    try {
+      const response = await fetch("/api/git/commit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd, paths, message: commitMessage, push: commitPush }),
+      });
+      const data = await response.json() as GitCommitResponse;
+      if (!response.ok || !data.ok) {
+        setCommitError(commitFailureText(data.kind, data.error, t));
+      } else {
+        setCommitMessage("");
+        setDeselectedPaths(new Set());
+        setCommitSuccess({ commit: data.commit ?? "", pushed: data.pushed === true, pushError: data.pushError });
+        setTreeRefreshKey((key) => key + 1);
+      }
+    } catch (error) {
+      setCommitError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCommitBusy(false);
+    }
+  }, [commitBusy, commitMessage, commitPush, cwd, selectedChangeFiles, t]);
+
+  const commitSuccessNode = commitSuccess ? (
+    <span>
+      {t("files.commitDone", { sha: commitSuccess.commit })}
+      {commitSuccess.pushed ? ` · ${t("files.commitPushed")}` : ""}
+      {commitSuccess.pushError
+        ? ` · ${commitSuccess.pushError === "no-upstream"
+            ? t("files.commitPushNoUpstream")
+            : t("files.commitPushFailed", { error: commitSuccess.pushError })}`
+        : ""}
+    </span>
+  ) : null;
+
   const showUploadFeedback = uploadBusy || pendingConflict !== null || uploadError !== null || uploadSummary !== null;
 
   const addUploadedFilesToChat = useCallback(() => {
@@ -1304,8 +1399,10 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       </div>
       )}
 
-      {!changesCollapsed && gitFiles.length > 0 && (
+      {!changesCollapsed && (gitFiles.length > 0 || commitSuccess) && (
         <div style={{ padding: "0 4px 2px" }}>
+          {gitFiles.length > 0 && (
+            <>
           <div
             aria-label={t("files.changeStats", {
               count: gitFiles.length,
@@ -1314,12 +1411,79 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
             })}
             style={{ display: "flex", alignItems: "center", gap: 6, height: 24, padding: "0 10px", fontSize: 12 }}
           >
-            <span style={{ color: "var(--text-dim)" }}>
+            <span style={{ color: "var(--text-dim)", flexShrink: 0 }}>
               {t("files.changedCount", { count: gitFiles.length })}
             </span>
             <span style={{ color: GIT_STATUS_COLORS.added, fontFamily: "var(--font-mono)" }}>+{gitLineStats.additions}</span>
             <span style={{ color: GIT_STATUS_COLORS.deleted, fontFamily: "var(--font-mono)" }}>-{gitLineStats.deletions}</span>
+            <span style={{ flex: 1 }} />
+            <button
+              onClick={() => {
+                setCommitOpen((open) => !open);
+                setCommitError(null);
+                setCommitSuccess(null);
+              }}
+              disabled={commitBusy}
+              style={{ height: 20, padding: "0 7px", display: "flex", alignItems: "center", gap: 4, flexShrink: 0, border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg-panel)", color: "var(--accent)", cursor: commitBusy ? "default" : "pointer", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}
+            >
+              {t("files.commit")}
+            </button>
           </div>
+          {commitOpen && (
+            <div style={{ padding: "2px 8px 6px", display: "flex", flexDirection: "column", gap: 6 }}>
+              <textarea
+                value={commitMessage}
+                onChange={(event) => setCommitMessage(event.target.value)}
+                placeholder={t("files.commitMessagePlaceholder")}
+                rows={3}
+                disabled={commitBusy}
+                style={{ width: "100%", boxSizing: "border-box", resize: "vertical", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4, padding: "4px 6px", color: "var(--text)", fontFamily: "var(--font-mono)", fontSize: 12, lineHeight: 1.4 }}
+              />
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-dim)", cursor: "pointer", userSelect: "none" }}>
+                <input
+                  type="checkbox"
+                  checked={commitPush}
+                  onChange={(event) => setCommitPush(event.target.checked)}
+                  disabled={commitBusy}
+                  style={{ accentColor: "var(--accent)" }}
+                />
+                {t("files.commitPush")}
+              </label>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <button
+                  onClick={submitCommit}
+                  disabled={commitBusy || selectedChangeFiles.length === 0}
+                  style={{ height: 22, padding: "0 10px", border: "none", borderRadius: 4, background: "var(--accent)", color: "var(--accent-contrast)", cursor: commitBusy ? "default" : "pointer", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}
+                >
+                  {commitBusy ? t("files.committing") : t("files.commit")}
+                </button>
+                <button
+                  onClick={() => {
+                    setCommitOpen(false);
+                    setCommitError(null);
+                    setCommitSuccess(null);
+                  }}
+                  disabled={commitBusy}
+                  style={{ height: 22, padding: "0 10px", border: "1px solid var(--border)", borderRadius: 4, background: "transparent", color: "var(--text-muted)", cursor: commitBusy ? "default" : "pointer", fontSize: 11, whiteSpace: "nowrap" }}
+                >
+                  {t("files.commitCancel")}
+                </button>
+                <span style={{ fontSize: 11, color: "var(--text-dim)", whiteSpace: "nowrap" }}>
+                  {t("files.commitSelectedCount", { count: selectedChangeFiles.length })}
+                </span>
+              </div>
+              {commitError && (
+                <div role="alert" style={{ fontSize: 11, color: "#f87171", whiteSpace: "pre-wrap" }}>
+                  {commitError}
+                </div>
+              )}
+              {commitSuccessNode && (
+                <div role="status" style={{ fontSize: 11, color: "var(--text-dim)" }}>
+                  {commitSuccessNode}
+                </div>
+              )}
+            </div>
+          )}
           {gitFiles.map((status) => (
             <ChangeRow
               key={status.filePath}
@@ -1327,9 +1491,22 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
               cwd={cwd}
               onOpenFile={onOpenFile}
               onAtMention={onAtMention}
+              checked={!deselectedPaths.has(status.filePath)}
+              onToggleSelected={(selected) => toggleChangeSelected(status.filePath, selected)}
               t={t}
             />
           ))}
+            </>
+          )}
+          {gitFiles.length === 0 && commitSuccess && (
+            <div
+              role="status"
+              style={{ display: "flex", alignItems: "center", gap: 6, margin: "2px 2px 0", padding: "4px 6px", fontSize: 11, color: "var(--text-dim)" }}
+            >
+              <span style={{ flex: 1, minWidth: 0 }}>{commitSuccessNode}</span>
+              <DismissButton onClick={() => setCommitSuccess(null)} title={t("files.commitDismiss")} />
+            </div>
+          )}
         </div>
       )}
 

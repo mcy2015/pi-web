@@ -123,11 +123,15 @@ export async function getGitStatus(cwd: string): Promise<GitStatusResponse> {
     const filePath = path.resolve(repositoryRoot, entry.path);
     if (!isWithinPath(cwd, filePath)) return [];
     const classified = classifyGitStatus(entry);
+    const originalPath = entry.originalPath
+      ? path.resolve(repositoryRoot, entry.originalPath)
+      : undefined;
     return [{
       filePath,
       ...classified,
       indexStatus: entry.indexStatus,
       worktreeStatus: entry.worktreeStatus,
+      ...(originalPath && originalPath !== filePath ? { originalPath } : {}),
     }];
   });
   const untrackedAdditions = files.reduce(
