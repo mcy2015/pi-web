@@ -130,14 +130,32 @@ export async function editMessageText(
   chatId: number,
   messageId: number,
   text: string,
-  options: { parseMode?: "HTML" } = {},
+  options: { parseMode?: "HTML"; richMarkdown?: string } = {},
 ): Promise<void> {
+  // richMarkdown swaps the text for a rich message (Bot API 10.1): the same
+  // edit can carry Markdown tables that text + parse_mode cannot express.
   await call(token, "editMessageText", {
     chat_id: chatId,
     message_id: messageId,
-    text,
-    ...(options.parseMode ? { parse_mode: options.parseMode } : {}),
-    link_preview_options: { is_disabled: true },
+    ...(options.richMarkdown !== undefined
+      ? { rich_message: { markdown: options.richMarkdown } }
+      : {
+          text,
+          ...(options.parseMode ? { parse_mode: options.parseMode } : {}),
+          link_preview_options: { is_disabled: true },
+        }),
+  });
+}
+
+/**
+ * Sends a rich message (Bot API 10.1) built from Markdown, which Telegram
+ * renders natively — including pipe tables, headings and task lists that
+ * sendMessage's parse modes have no entity for.
+ */
+export async function sendRichMessage(token: string, chatId: number, markdown: string): Promise<TelegramMessage> {
+  return call(token, "sendRichMessage", {
+    chat_id: chatId,
+    rich_message: { markdown },
   });
 }
 

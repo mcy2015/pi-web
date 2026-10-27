@@ -4,9 +4,8 @@
 // is best effort: a missing token or an unreachable chat logs a warning and
 // never fails the run it belongs to.
 
-import { sendMessage, TelegramApiError } from "../telegram/bot-api";
 import { readTelegramConfig } from "../telegram/config-store";
-import { splitForTelegram, markdownToTelegramHtml } from "../telegram/message-text";
+import { sendMarkdownText } from "../telegram/rich-send";
 import type { AutomationModel, RunStatus } from "./store";
 
 export interface AutomationOutcome {
@@ -20,19 +19,6 @@ export interface AutomationOutcome {
   error: string | null;
   startedAt: number;
   durationMs: number;
-}
-
-/** One chunk as Telegram HTML, falling back to plain text when rejected. */
-async function sendChunk(token: string, chatId: number, chunk: string): Promise<void> {
-  try {
-    await sendMessage(token, chatId, markdownToTelegramHtml(chunk), { parseMode: "HTML" });
-  } catch (error) {
-    if (error instanceof TelegramApiError && error.statusCode === 400) {
-      await sendMessage(token, chatId, chunk);
-      return;
-    }
-    throw error;
-  }
 }
 
 function formatDuration(ms: number): string {
@@ -71,13 +57,12 @@ export async function pushRunOutcome(automation: AutomationModel, outcome: Autom
     : outcomeHeader(automation, outcome);
   for (const target of targets) {
     if (target.type !== "telegram") continue;
-    for (const chunk of splitForTelegram(text)) {
-      try {
-        await sendChunk(config.token, target.chatId, chunk);
-      } catch (error) {
-        console.warn(`[pi-web] automation "${automation.name}": notifying telegram chat ${target.chatId} failed: ${error instanceof Error ? error.message : String(error)}`);
-        break;
-      }
+    try {
+      // Rich when the reply holds a table (Telegram renders it), else chunks.
+      await sendMarkdownText(config.token, target.chatId, text);
+    } catch (error) {
+      console.warn(`[pi-web] automation "${automation.name}": notifying telegram chat ${target.chatId} failed: ${error instanceof Error ? error.message : String(error)}`);
+      break;
     }
   }
 }

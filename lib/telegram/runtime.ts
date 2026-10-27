@@ -29,7 +29,8 @@ import {
   type TelegramConfig,
 } from "./config-store";
 import { resetChatSession, runChatTurn, withChatWrapper, type TelegramUiRequest, type TurnImage, type TurnInput } from "./session-bridge";
-import { splitForTelegram, markdownToTelegramHtml, TELEGRAM_MESSAGE_LIMIT } from "./message-text";
+import { markdownToTelegramHtml, TELEGRAM_MESSAGE_LIMIT } from "./message-text";
+import { sendMarkdownText, finalizePreviewRich } from "./rich-send";
 import type { TelegramStatus } from "./types";
 import { getRpcSession } from "@/lib/rpc-manager";
 
@@ -191,26 +192,12 @@ function isAllowed(config: TelegramConfig, chatId: number): boolean {
   return config.allowedChats.some((chat) => chat.id === chatId);
 }
 
-/** One chunk as Telegram HTML, falling back to plain text when Telegram rejects it. */
-async function sendChunk(token: string, chatId: number, chunk: string): Promise<void> {
-  try {
-    await sendMessage(token, chatId, markdownToTelegramHtml(chunk), { parseMode: "HTML" });
-  } catch (error) {
-    if (error instanceof TelegramApiError && error.statusCode === 400) {
-      await sendMessage(token, chatId, chunk);
-      return;
-    }
-    throw error;
-  }
-}
-
 async function reply(token: string, chatId: number, text: string): Promise<void> {
-  for (const chunk of splitForTelegram(text)) {
-    try {
-      await sendChunk(token, chatId, chunk);
-    } catch (error) {
-      console.warn(`[pi-web] telegram chat ${chatId}: sending a reply failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
+  try {
+    // Table-carrying replies leave as one rich message; the rest as chunks.
+    await sendMarkdownText(token, chatId, text);
+  } catch (error) {
+    console.warn(`[pi-web] telegram chat ${chatId}: sending a reply failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -419,12 +406,20 @@ function dispatchTurn(token: string, chatId: number, input: TurnInput): void {
       }
       return;
     }
-    if (preview.messageId !== null && outcome.reply.length <= TELEGRAM_MESSAGE_LIMIT) {
-      await editPreview(token, chatId, outcome.reply);
-      preview.messageId = null;
-      return;
+    if (preview.messageId !== null) {
+      // A table-carrying reply finalizes its preview as one rich message
+      // (no 4096 cap applies there); otherwise the regular edit-or-resend.
+      if (await finalizePreviewRich(token, chatId, preview.messageId, outcome.reply)) {
+        preview.messageId = null;
+        return;
+      }
+      if (outcome.reply.length <= TELEGRAM_MESSAGE_LIMIT) {
+        await editPreview(token, chatId, outcome.reply);
+        preview.messageId = null;
+        return;
+      }
+      await deleteMessage(token, chatId, preview.messageId).catch(() => {});
     }
-    if (preview.messageId !== null) await deleteMessage(token, chatId, preview.messageId).catch(() => {});
     preview.messageId = null;
     await reply(token, chatId, outcome.reply);
   })().finally(() => {
