@@ -2701,6 +2701,22 @@ select.mcp-add-input {
   font-size: 12px;
 }
 
+/* The silence-keyword row: a label and an input that fills the row. */
+.automations-notify-row.is-wide {
+  display: flex;
+  width: 100%;
+  cursor: default;
+}
+
+.automations-notify-silent-label {
+  flex: 0 0 auto;
+}
+
+.automations-notify-row .mcp-add-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .automations-prompt {
   width: 100%;
   min-height: 96px;

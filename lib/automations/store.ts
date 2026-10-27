@@ -63,6 +63,10 @@ export interface AutomationModel {
   notify: boolean;
   /** Extra channels a finished run announces its outcome (and full reply) to. */
   notifyChannels: NotifyChannelTarget[];
+  /** Silence keywords (comma separated): a successful run whose final reply
+   *  contains any of them notifies no one — neither the browser push nor the
+   *  channels. "" always notifies; failures notify regardless. */
+  silentWhen: string;
   /** The scheduler's cache: when this automation is next due. */
   nextDueAt: number | null;
   lastRunAt: number | null;
@@ -215,6 +219,7 @@ function parseAutomation(raw: unknown): AutomationModel | null {
     thinkingLevel: typeof record.thinkingLevel === "string" ? record.thinkingLevel : null,
     notify: record.notify !== false,
     notifyChannels: parseNotifyChannels(record.notifyChannels),
+    silentWhen: typeof record.silentWhen === "string" ? record.silentWhen : "",
     nextDueAt: typeof record.nextDueAt === "number" ? record.nextDueAt : null,
     lastRunAt: typeof record.lastRunAt === "number" ? record.lastRunAt : null,
     createdAt: typeof record.createdAt === "number" ? record.createdAt : 0,
@@ -295,4 +300,14 @@ export function fileHasRunsInProgress(file: AutomationsFile, automationId: strin
 
 export function fileExistsAt(path: string): boolean {
   return existsSync(path);
+}
+
+/** Does a finished run's reply hit the automation's silence keywords? An
+ *  empty keyword list never silences; matching is case-insensitive substring,
+ *  so a prompt can pin an exact marker ("NO_REPLY") for the agent to emit. */
+export function isSilentReply(silentWhen: string, reply: string): boolean {
+  const keywords = silentWhen.split(/[,，]/).map((keyword) => keyword.trim()).filter((keyword) => keyword !== "");
+  if (keywords.length === 0) return false;
+  const haystack = reply.toLowerCase();
+  return keywords.some((keyword) => haystack.includes(keyword.toLowerCase()));
 }

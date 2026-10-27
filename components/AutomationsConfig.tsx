@@ -64,6 +64,7 @@ interface Draft {
   prompt: string;
   notify: boolean;
   notifyChannels: NotifyChannelDraft[];
+  silentWhen: string;
 }
 
 const EVERY_UNIT_MS: Record<Draft["everyUnit"], number> = {
@@ -107,6 +108,7 @@ function draftFrom(automation: AutomationModel | null): Draft {
       prompt: "",
       notify: true,
       notifyChannels: [],
+      silentWhen: "",
     };
   }
   const schedule = automation.schedule;
@@ -126,6 +128,7 @@ function draftFrom(automation: AutomationModel | null): Draft {
     notify: automation.notify,
     notifyChannels: automation.notifyChannels.flatMap((target): NotifyChannelDraft[] =>
       target.type === "telegram" && Number.isInteger(target.chatId) ? [{ type: "telegram", chatId: target.chatId }] : []),
+    silentWhen: automation.silentWhen,
   };
 }
 
@@ -456,6 +459,19 @@ export function AutomationsConfig({ embedded = true, onClose }: { embedded?: boo
                       {telegram !== null && telegram.chats.length === 0 && (
                         <div className="automations-notify-hint">{t("automations.notifyTelegramHint")}</div>
                       )}
+                      <div className="automations-notify-row is-wide">
+                        <span className="automations-notify-silent-label">{t("automations.notifySilentLabel")}</span>
+                        <input
+                          className="mcp-add-input"
+                          type="text"
+                          spellCheck={false}
+                          placeholder="NO_REPLY"
+                          aria-label={t("automations.notifySilentLabel")}
+                          value={draft.silentWhen}
+                          onChange={(event) => setDraft((current) => ({ ...current, silentWhen: event.target.value }))}
+                        />
+                      </div>
+                      <div className="automations-notify-hint">{t("automations.notifySilentHint")}</div>
                     </div>
                   </ConfigDetailGridRow>
                 </ConfigDetailGrid>
@@ -486,6 +502,7 @@ export function AutomationsConfig({ embedded = true, onClose }: { embedded?: boo
                         prompt: draft.prompt,
                         notify: draft.notify,
                         notifyChannels: draft.notifyChannels,
+                        silentWhen: draft.silentWhen.trim(),
                       };
                       void run("save", body, editing ? t("automations.saved") : t("automations.created")).then((ok) => {
                         if (!ok) return;

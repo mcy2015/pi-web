@@ -100,6 +100,8 @@ export const zhTWLocale: LocalePlugin = {
     "automations.notifyLabel": "執行結束推送通知",
     "automations.notifyBrowser": "瀏覽器推送",
     "automations.notifyTelegramHint": "要把執行結果推送到 Telegram，請先在 設定 › 頻道 裡允許一個聊天。",
+    "automations.notifySilentLabel": "靜默條件",
+    "automations.notifySilentHint": "執行成功且回覆包含任一關鍵詞（逗號分隔）時不推送任何通知；失敗仍會通知。留空總是推送。",
     "automations.enabledLabel": "啟用任務",
     "automations.disclosure": "每次執行會在上面的工作目錄裡啟動一個擁有完整工具權限的 agent 會話，並按原文執行提示詞——與你親自傳送完全一樣。",
     "automations.create": "建立任務",

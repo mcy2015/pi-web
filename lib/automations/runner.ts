@@ -14,7 +14,7 @@ import { getRpcSession, startRpcSession, type AgentSessionWrapper } from "@/lib/
 import { notifySessionComplete } from "@/lib/web-push";
 import { allowFileRoot } from "@/lib/file-access";
 import { invalidateSessionListCache } from "@/lib/session-reader";
-import { editAutomations, readAutomations, type AutomationModel, type AutomationRun } from "./store";
+import { editAutomations, isSilentReply, readAutomations, type AutomationModel, type AutomationRun } from "./store";
 import { nextDueTime, scheduleProblem } from "./cron-schedule";
 import { pushRunOutcome } from "./notify";
 import { agentMessageText } from "../telegram/message-text";
@@ -215,17 +215,22 @@ export async function fireAutomation(
       error: aborted ? "The turn was stopped" : null,
     });
     invalidateSessionListCache();
-    if (automation.notify) {
+    // A successful reply that hits the automation's silence keywords notifies
+    // no one; a failed or stopped run always does.
+    const silent = !aborted && isSilentReply(automation.silentWhen, lastAssistantText);
+    if (automation.notify && !silent) {
       await notifySessionComplete(sessionId, name).catch(() => {});
     }
-    await pushRunOutcome(automation, {
-      status: aborted ? "skipped" : "done",
-      name,
-      reply: lastAssistantText,
-      error: aborted ? "The turn was stopped" : null,
-      startedAt: runStartedAt,
-      durationMs: Date.now() - runStartedAt,
-    }).catch(() => {});
+    if (!silent) {
+      await pushRunOutcome(automation, {
+        status: aborted ? "skipped" : "done",
+        name,
+        reply: lastAssistantText,
+        error: aborted ? "The turn was stopped" : null,
+        startedAt: runStartedAt,
+        durationMs: Date.now() - runStartedAt,
+      }).catch(() => {});
+    }
     return { runId, sessionId, error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

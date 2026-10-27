@@ -53,6 +53,11 @@ function asNotifyChannels(raw: unknown): NotifyChannelTarget[] {
   return targets;
 }
 
+/** Silence keywords off the wire: trimmed and bounded; "" disables silence. */
+function asSilentWhen(raw: unknown): string {
+  return typeof raw === "string" ? raw.trim().slice(0, 300) : "";
+}
+
 /** What the notify row's Telegram picklist shows: the channel's chats. */
 function telegramPicklist(): { tokenSet: boolean; chats: { id: number; title: string | null }[] } {
   const config = readTelegramConfig();
@@ -120,6 +125,7 @@ export async function POST(req: NextRequest) {
           thinkingLevel: asString(body.thinkingLevel),
           notify: body.notify !== false,
           notifyChannels: asNotifyChannels(body.notifyChannels),
+          silentWhen: asSilentWhen(body.silentWhen),
           nextDueAt: null,
           lastRunAt: null,
           createdAt: Date.now(),
@@ -144,6 +150,7 @@ export async function POST(req: NextRequest) {
           prompt: draft.prompt!,
           notify: body.notify !== false,
           notifyChannels: asNotifyChannels(body.notifyChannels),
+          silentWhen: asSilentWhen(body.silentWhen),
           ...(model && typeof model.provider === "string" && typeof model.modelId === "string"
             ? { model: { provider: model.provider, modelId: model.modelId } }
             : { model: null }),

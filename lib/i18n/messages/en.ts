@@ -100,6 +100,8 @@ export const enLocale: LocalePlugin = {
     "automations.notifyLabel": "Notify when a run finishes",
     "automations.notifyBrowser": "Browser push",
     "automations.notifyTelegramHint": "To push run results to Telegram, allowlist a chat in Settings › Channels.",
+    "automations.notifySilentLabel": "Silence when",
+    "automations.notifySilentHint": "Successful runs whose reply contains any of these keywords (comma separated) send no notification; failures still notify. Empty always notifies.",
     "automations.enabledLabel": "Automation enabled",
     "automations.disclosure": "Each run starts an agent session with full tool access in the working directory above and runs the prompt as written — exactly as if you had sent it yourself.",
     "automations.create": "Create automation",
