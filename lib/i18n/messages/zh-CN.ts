@@ -248,6 +248,8 @@ export const zhCNLocale: LocalePlugin = {
     "agents.overridden": "被覆盖",
     "subagent.openTab": "在侧栏面板中查看子代理工作",
     "subagent.closeTab": "关闭子代理侧栏面板",
+    "subagent.enter": "进入",
+    "subagent.enterTitle": "以主对话打开该子代理的会话",
     "subagent.tabLabel": "子代理 {name}",
     "subagent.refresh": "刷新",
     "subagent.viewer.starting": "子代理会话正在启动…",

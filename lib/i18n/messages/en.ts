@@ -248,6 +248,8 @@ export const enLocale: LocalePlugin = {
     "agents.overridden": "Overridden",
     "subagent.openTab": "View sub-agent work in side panel",
     "subagent.closeTab": "Close sub-agent side panel",
+    "subagent.enter": "Enter",
+    "subagent.enterTitle": "Open this sub-agent's conversation as the main chat",
     "subagent.tabLabel": "Sub-agent {name}",
     "subagent.refresh": "Refresh",
     "subagent.viewer.starting": "Sub-agent session is starting…",

@@ -39,6 +39,7 @@ import { HIDDEN_PAGE_GRACE_MS } from "@/hooks/usePageHidden";
 import { AGENT_EVENT_HEARTBEAT_MS, isNestedToolExecutionEvent, isSystemMessageEvent } from "@/lib/agent-event-wire";
 import { getToolExecutionProgress } from "@/lib/tool-execution-progress";
 import { CODEMODE_TOOL_NAME, getCodemodeProgress } from "@/lib/codemode-view";
+import { isSubagentToolDetails } from "@/lib/subagent-tool-details";
 import { updateExtensionWidgets } from "@/lib/extension-widgets";
 import { bareMcpOpensSettings } from "@/lib/mcp-command";
 import type { SettingsSection } from "@/lib/settings-navigation";
@@ -1726,8 +1727,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         const name = event.toolName as string;
         const partialResult = event.partialResult as Partial<ToolResultMessage> | undefined;
         const content = partialResult?.content;
-        // Live output for shells; for codemode, the calls its script has made so far.
-        if ((name === "bash" || name === "powershell" || name === CODEMODE_TOOL_NAME) && Array.isArray(content)) {
+        // Live output for shells; for codemode, the calls its script has made so
+        // far. A subagent's updates carry its session id in `details` — kept so
+        // the Agent card in the transcript can offer its entries while the run
+        // is still going (the final result otherwise arrives only at the end).
+        if (Array.isArray(content) && (name === "bash" || name === "powershell" || name === CODEMODE_TOOL_NAME || isSubagentToolDetails(partialResult?.details))) {
           setActiveToolResults((prev) => {
             const next = new Map(prev);
             next.set(id, {

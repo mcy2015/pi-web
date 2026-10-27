@@ -248,6 +248,8 @@ export const zhTWLocale: LocalePlugin = {
     "agents.overridden": "已被覆寫",
     "subagent.openTab": "在側欄面板中檢視子代理工作",
     "subagent.closeTab": "關閉子代理側欄面板",
+    "subagent.enter": "進入",
+    "subagent.enterTitle": "以主對話開啟該子代理的會話",
     "subagent.tabLabel": "子代理 {name}",
     "subagent.refresh": "重新整理",
     "subagent.viewer.starting": "子代理工作階段正在啟動…",

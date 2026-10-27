@@ -18,6 +18,7 @@ import { checkModelContext } from "./model-context.mjs";
 import { checkModelSelector } from "./model-selector.mjs";
 import { checkFilesPlacement, showSidebarSessions } from "./sidebar.mjs";
 import { checkSessionNavigation } from "./session-navigation.mjs";
+import { checkSubagentCard } from "./subagent-card.mjs";
 import { checkProjectNavigation, createProjectNavigationFixtures } from "./project-navigation.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -40,6 +41,8 @@ const RICH = "e2e-rich-session";
 const COMPACTED = "e2e-compacted-session";
 const APPEND = "e2e-external-append-session";
 const CODE_BACKGROUND = "e2e-code-background";
+const SUBAGENT_PARENT = "e2e-subagent-parent";
+const SUBAGENT_CHILD = "e2e-subagent-child";
 const text = (i) => `E2E message ${String(i).padStart(4, "0")}`;
 const ids = (start, end) => Array.from({ length: end - start }, (_, i) => `e${start + i}`);
 
@@ -143,6 +146,42 @@ try {
     + "E2E compacted answer paragraph.\n\n".repeat(20),
   }]));
   writeSession(COMPACTED, compactedEntries);
+  // A finished Agent run whose result carries the subagent details, and the
+  // child file with the metadata that folds it into the parent's family. The
+  // parent's last assistant message is the call itself, so the card renders
+  // unfolded and its two entries are reachable.
+  const subagentResult = message("result", "call", "toolResult", [{ type: "text", text: "E2E subagent finished" }]);
+  Object.assign(subagentResult.message, {
+    toolCallId: "t1",
+    toolName: "Agent",
+    isError: false,
+    details: {
+      kind: "pi-web-subagent",
+      sessionId: SUBAGENT_CHILD,
+      profile: "general-purpose",
+      description: "E2E subagent",
+      status: "completed",
+      runInBackground: false,
+      createdAt: timestamp,
+    },
+  });
+  writeSession(SUBAGENT_PARENT, [
+    message("user", null, "user", "E2E subagent request"),
+    message("call", "user", "assistant", [
+      { type: "toolCall", id: "t1", name: "Agent", arguments: { subagent_type: "general-purpose", prompt: "E2E subagent task", description: "E2E subagent" } },
+    ]),
+    subagentResult,
+  ]);
+  const parentPath = join(sessionDir, `2026-08-23T00-00-00-000Z_${SUBAGENT_PARENT}.jsonl`);
+  const childEntries = [
+    { type: "custom", id: "meta", parentId: null, timestamp, customType: "pi-web:subagent", data: { version: 1, parentSessionId: SUBAGENT_PARENT, parentSessionPath: parentPath, profile: "general-purpose", description: "E2E subagent", task: "E2E subagent task", runInBackground: false, createdAt: timestamp } },
+    message("c1", null, "user", "E2E subagent task assigned"),
+    message("c2", "c1", "assistant", [{ type: "text", text: "E2E subagent reply" }]),
+    { type: "custom", id: "done", parentId: "c2", timestamp, customType: "pi-web:subagent-result", data: { status: "completed", completedAt: timestamp, content: "E2E subagent finished" } },
+  ];
+  writeFileSync(join(sessionDir, `2026-08-23T00-00-00-000Z_${SUBAGENT_CHILD}.jsonl`),
+    [{ type: "session", version: 3, id: SUBAGENT_CHILD, timestamp, cwd: project, parentSession: parentPath }, ...childEntries]
+      .map((entry) => JSON.stringify(entry)).join("\n") + "\n");
   writeSession(APPEND, [
     message("root", null, "user", "E2E wrapper root"),
     message("reply", "root", "assistant", "E2E wrapper reply"),
@@ -190,7 +229,7 @@ try {
     const response = await fetch(`${base}/api/sessions`, { signal: AbortSignal.timeout(5000) }).catch(() => null);
     if (response?.ok) {
       const { sessions } = await response.json();
-      assert.deepEqual(sessions.map((session) => session.id).sort(), [LONG, BRANCH, RICH, COMPACTED, APPEND, CODE_BACKGROUND, projectNavigation.id].sort());
+      assert.deepEqual(sessions.map((session) => session.id).sort(), [LONG, BRANCH, RICH, COMPACTED, APPEND, CODE_BACKGROUND, SUBAGENT_PARENT, SUBAGENT_CHILD, projectNavigation.id].sort());
       break;
     }
     assert.ok(Date.now() < deadline, "Server readiness timed out; see server.log");
@@ -536,6 +575,8 @@ try {
     },
   });
   await checkProjectNavigation({ browser, base, artifacts, fixture: projectNavigation, otherSessionId: BRANCH, api, post });
+  // Last of all in its own context: the Agent card's subagent entries.
+  await checkSubagentCard({ browser, base, artifacts, parent: SUBAGENT_PARENT, child: SUBAGENT_CHILD });
 } catch (error) {
   console.error(error);
   process.exitCode = 1;

@@ -1244,6 +1244,33 @@ export function AppShell() {
     if (isMobile) setSidebarOpen(false);
   }, [isMobile]);
 
+  // The Agent card's "enter" action: the subagent's own chat becomes the main
+  // one, as the agent switcher's row click does. The family listing usually
+  // holds the child's SessionInfo already; a run too new for it falls back to
+  // reading the session once, so entering never depends on a refresh.
+  const handleEnterSubagent = useCallback((sessionId: string, label: string) => {
+    const known = activeSessionFamily
+      ? activeSessionFamily.subagents.find((session) => session.id === sessionId)
+        ?? (activeSessionFamily.root.id === sessionId ? activeSessionFamily.root : undefined)
+      : undefined;
+    if (known) {
+      handleSelectSession(known);
+      return;
+    }
+    void (async () => {
+      try {
+        const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json() as { info?: SessionInfo; error?: string };
+        if (!data.info) throw new Error(data.error ?? `HTTP ${res.status}`);
+        handleSelectSession(data.info);
+      } catch {
+        // Keep the tab as the fallback entry: opening it needs no SessionInfo.
+        handleOpenSubagentTab(sessionId, label);
+      }
+    })();
+  }, [activeSessionFamily, handleSelectSession, handleOpenSubagentTab]);
+
   // The agent switcher's side-panel button: opens a subagent's tab, or closes
   // it when the open panel already has it (the panel closes with its last tab).
   // The switcher stays open beside the panel, except on phones, where the
@@ -2642,6 +2669,7 @@ export function AppShell() {
               onOpenFile={handleOpenLinkedFile}
               onFilesUploaded={handleExplorerRefresh}
               onOpenSubagent={handleOpenSubagentTab}
+              onEnterSubagent={handleEnterSubagent}
               onAskInNewChat={handleAskInNewChat}
               quoteSelectionEnabled={quoteSelectionEnabled}
               initialPrompt={pendingQuotePrompt?.sessionId === selectedSession?.id ? pendingQuotePrompt?.text : undefined}
