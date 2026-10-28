@@ -1,5 +1,19 @@
 const STABLE_VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)$/;
 
+import packageJson from "../package.json";
+
+function repositoryWebUrl(pkg: { repository?: unknown } = packageJson): string {
+  const repo = pkg.repository;
+  const url = typeof repo === "string" ? repo : (typeof repo === "object" && repo !== null && "url" in repo)
+    ? String((repo as { url?: unknown }).url ?? "")
+    : "";
+  return url.replace(/^git\+/, "").replace(/\.git$/, "");
+}
+
+export function getNpmLatestUrl(packageName: string = packageJson.name): string {
+  return `https://registry.npmjs.org/${encodeURIComponent(packageName)}/latest`;
+}
+
 function parseStableVersion(version: string): [number, number, number] | null {
   const match = STABLE_VERSION_PATTERN.exec(version);
   if (!match) return null;
@@ -24,5 +38,5 @@ export function isNewerStableVersion(candidate: string, current: string): boolea
 
 export function getPiWebReleaseUrl(version: string): string | null {
   if (!parseStableVersion(version)) return null;
-  return `https://github.com/agegr/pi-web/releases/tag/v${version}`;
+  return `${repositoryWebUrl()}/releases/tag/v${version}`;
 }

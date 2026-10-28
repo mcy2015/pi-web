@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import { dirname, join } from "path";
 import webpush from "web-push";
+import packageJson from "../package.json";
 import { writePrivateFileAtomicSync } from "./atomic-file";
 import { enLocale } from "./i18n/messages/en";
 import { zhCNLocale } from "./i18n/messages/zh-CN";
@@ -49,7 +50,7 @@ function stateFilePath(): string {
 export function vapidSubject(): string {
   const configured = process.env.PI_WEB_PUSH_SUBJECT?.trim();
   if (configured) return configured;
-  return "https://github.com/agegr/pi-web";
+  return packageJson.homepage;
 }
 
 // Ask the push service to deliver immediately. Lower urgencies let idle

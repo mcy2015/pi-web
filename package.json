@@ -1,14 +1,14 @@
 {
-  "name": "@agegr/pi-web",
-  "version": "0.12.2",
-  "description": "Web UI for the pi coding agent",
-  "homepage": "https://github.com/agegr/pi-web#readme",
+  "name": "@mcy2015/pi-web",
+  "version": "0.13.0",
+  "description": "Web UI for the pi coding agent (mcy2015 fork)",
+  "homepage": "https://github.com/mcy2015/pi-web#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/agegr/pi-web.git"
+    "url": "git+https://github.com/mcy2015/pi-web.git"
   },
   "bugs": {
-    "url": "https://github.com/agegr/pi-web/issues"
+    "url": "https://github.com/mcy2015/pi-web/issues"
   },
   "license": "MIT",
   "engines": {
