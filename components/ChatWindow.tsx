@@ -10,6 +10,7 @@ import { EXTENSION_DIALOG_BASE_WIDTH, fitExtensionDialogWidth } from "@/lib/exte
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
 import { collapsesProcessDetails, countToolCallBlocks, getDisplayableAssistantBlocks, hasAssistantAnswer, isHiddenCustomMessage, isMessageGroupAnchor, splitFinalAssistantBlocks } from "@/lib/message-display";
 import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
+import { deriveTodoState } from "@/lib/todo-state";
 import { collectSubagentSources } from "@/lib/subagent-written-files";
 import { getFinalAnswerViews, keepWrittenFiles, type FinalAnswerViews } from "@/lib/turn-views";
 import { formatTurnDuration, getTurnDurationMs } from "@/lib/turn-duration";
@@ -18,6 +19,7 @@ import { dropMentionText, splitDroppedItems, uploadFiles, type DroppedItem } fro
 import { MessageView } from "./MessageView";
 import { MarkdownBody } from "./MarkdownBody";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
+import { TodoPanel } from "./TodoPanel";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { AnsiText } from "./AnsiText";
@@ -826,6 +828,10 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   }, [activeToolResults, messages]);
   // Same idea for the copies a grouped turn passes MessageView (see getFinalAnswerViews).
   const finalAnswerViewCache = useMemo(() => new WeakMap<AssistantMessage, FinalAnswerViews>(), []);
+  // The session's todo snapshot, derived from the newest TodoWrite/TodoRead
+  // (or legacy rpiv `todo`) result in the loaded window. Live runs grow
+  // `messages` through SSE, so the panel above the composer follows along.
+  const todoSnapshot = useMemo(() => deriveTodoState(messages), [messages]);
   const inputHistory = useMemo(() => {
     const seen = new Set<string>();
     const history: string[] = [];
@@ -1522,6 +1528,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
             </div>
           </div>
         )}
+        <TodoPanel snapshot={todoSnapshot} />
         {chatInputElement}
         <ExtensionStatusBar
           statuses={extensionStatuses}

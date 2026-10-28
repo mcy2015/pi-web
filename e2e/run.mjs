@@ -20,6 +20,7 @@ import { checkFilesPlacement, showSidebarSessions } from "./sidebar.mjs";
 import { checkSessionNavigation } from "./session-navigation.mjs";
 import { checkSubagentCard } from "./subagent-card.mjs";
 import { checkWrittenFiles } from "./written-files.mjs";
+import { checkTodoPanel, createTodoPanelFixtures } from "./todo-panel.mjs";
 import { checkProjectNavigation, createProjectNavigationFixtures } from "./project-navigation.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -248,6 +249,7 @@ try {
   ]);
 
   const projectNavigation = createProjectNavigationFixtures({ agentDir, sessionDir, timestamp });
+  const todoPanel = createTodoPanelFixtures({ sessionDir, project, timestamp });
 
   const probe = createServer();
   probe.listen(0, "127.0.0.1");
@@ -289,7 +291,7 @@ try {
     const response = await fetch(`${base}/api/sessions`, { signal: AbortSignal.timeout(5000) }).catch(() => null);
     if (response?.ok) {
       const { sessions } = await response.json();
-      assert.deepEqual(sessions.map((session) => session.id).sort(), [LONG, BRANCH, RICH, COMPACTED, APPEND, CODE_BACKGROUND, SUBAGENT_PARENT, SUBAGENT_CHILD, WRITTEN, WRITTEN_CHILD, projectNavigation.id].sort());
+      assert.deepEqual(sessions.map((session) => session.id).sort(), [LONG, BRANCH, RICH, COMPACTED, APPEND, CODE_BACKGROUND, SUBAGENT_PARENT, SUBAGENT_CHILD, WRITTEN, WRITTEN_CHILD, projectNavigation.id, todoPanel.id].sort());
       break;
     }
     assert.ok(Date.now() < deadline, "Server readiness timed out; see server.log");
@@ -638,6 +640,7 @@ try {
   // Last of all in its own context: the Agent card's subagent entries.
   await checkSubagentCard({ browser, base, artifacts, parent: SUBAGENT_PARENT, child: SUBAGENT_CHILD });
   await checkWrittenFiles({ browser, base, artifacts, session: WRITTEN });
+  await checkTodoPanel({ browser, base, artifacts, session: todoPanel.id });
 } catch (error) {
   console.error(error);
   process.exitCode = 1;

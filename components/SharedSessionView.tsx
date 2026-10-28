@@ -2,10 +2,12 @@
 
 import { useMemo } from "react";
 import { MessageView } from "./MessageView";
+import { TodoPanel } from "./TodoPanel";
 import { useI18n } from "@/hooks/useI18n";
 import { formatRelativeTime } from "@/lib/i18n/format";
 import type { SharedSessionSnapshot } from "@/lib/share-types";
 import type { AgentMessage, ToolResultMessage } from "@/lib/types";
+import { deriveTodoState } from "@/lib/todo-state";
 
 // The public, read-only rendering of a shared session. It reuses MessageView
 // with only its passive props: no streaming, no callbacks, no session id (the
@@ -22,6 +24,7 @@ function buildToolResults(messages: AgentMessage[]): Map<string, ToolResultMessa
 export function SharedSessionView({ snapshot }: { snapshot: SharedSessionSnapshot }) {
   const { t, locale } = useI18n();
   const toolResults = useMemo(() => buildToolResults(snapshot.messages), [snapshot.messages]);
+  const todoSnapshot = useMemo(() => deriveTodoState(snapshot.messages), [snapshot.messages]);
 
   const created = (() => {
     const ms = Date.parse(snapshot.createdAt);
@@ -39,6 +42,7 @@ export function SharedSessionView({ snapshot }: { snapshot: SharedSessionSnapsho
           {snapshot.cwd && <span className="shared-session-cwd">{snapshot.cwd}</span>}
         </div>
       </header>
+      <TodoPanel snapshot={todoSnapshot} />
       <main className="shared-session-messages">
         {snapshot.messages.map((message, idx) => (
           <MessageView

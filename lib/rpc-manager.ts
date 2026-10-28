@@ -36,6 +36,7 @@ import {
   createSubagentExtension,
   preferPiWebSubagentExtension,
 } from "./subagent-extension";
+import { preferPiWebTodoExtension } from "./todo-extension";
 import {
   listSubagentProfiles,
   hasSubagentResourceSnapshot,
@@ -2618,7 +2619,7 @@ export async function startRpcSession(
                 isBuiltInSubagentsEnabled,
               ),
             ],
-            extensionsOverride: (base) => preferUserBashExtension(preferPiWebSubagentExtension(base)),
+            extensionsOverride: (base) => preferPiWebTodoExtension(preferUserBashExtension(preferPiWebSubagentExtension(base))),
           },
       ...(trustReloadOptions ? { resourceLoaderReloadOptions: trustReloadOptions } : {}),
     });

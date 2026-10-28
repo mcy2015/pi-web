@@ -131,6 +131,9 @@ lib/
   tool-presets.ts           PRESET_NONE/READ_ONLY/DEFAULT/FULL + getPresetFromTools()
   tool-preset-preference.ts browser-persisted default preset for fresh sessions
   tool-fields.ts            a tool call's arguments as flat rows: all of them or no table
+  todo-extension.ts         builtin:todo — TodoWrite/TodoRead snapshot tools, details envelope, branch replay, rpiv-todo suppression
+  todo-panel-prefs.ts       per-browser collapsed state of the todo panel
+  todo-state.ts             client-safe: newest todo snapshot derived from tool results (built-in envelope + legacy rpiv list)
   builtin-extensions.ts     codemode / tool-search / mcp built-ins, sandbox self-test, -builtin: switches
   codemode-settings.ts      Code mode automatic/always (+codemode in global defaultTools), codemode.mode and inlineBudget; project overrides
   codemode-view.ts          display helpers for codemode cards
@@ -215,6 +218,7 @@ components/
   SidebarIcons.tsx         sidebar stroke icons
   ChatWindow.tsx           chat composition + completion sound
   ChatInput.tsx            input bar + model/thinking/tools/compact controls
+  TodoPanel.tsx            the session's todo list above the composer: collapsed summary bar, expandable read-only checklist
   MessageView.tsx          one message (user/assistant/toolCall/toolResult)
   CodemodeToolView.tsx     codemode card: the tool calls its script made
   BranchNavigator.tsx      in-session branch switcher
@@ -280,6 +284,7 @@ Design decisions and traps live in `docs/agents/`, one note per area. Read every
 - [subagents.md](docs/agents/subagents.md): the built-in subagent setting, profiles and their files, run status, completion notifications, the subagent viewer tab. Files: `lib/subagent*.ts`, `app/api/subagents/**`, `components/AgentsConfig.tsx`, `components/SubagentViewer.tsx`, `components/subagent-viewer-state.ts`.
 - [client-platform.md](docs/agents/client-platform.md): the global shortcuts (Ctrl+Alt+N on macOS's dead-key Option+N and Windows AltGr, Esc stacking), mobile software keyboard and viewport height, the terminal's extra keys, its own dark/light theme and its font size following the chat's, completion sound. Files: `hooks/useKeyboardShortcuts.ts`, `hooks/useViewportHeight.ts`, `hooks/useAudio.ts`, `components/TerminalExtraKeys.tsx`, `lib/terminal-extra-keys.ts`, `lib/terminal-theme.ts`, `hooks/useTerminalTheme.ts`, `terminalFontSize()` in `hooks/useChatAppearance.ts`, the keyboard-open CSS.
 - [channels.md](docs/agents/channels.md): the Telegram channel's outgoing pipeline: rich messages (Bot API 10.1 tables) → Telegram HTML (tables as vertical lists) → plain text; the rich-Markdown underscore trap; the streaming preview's rich finalize. Files: `lib/telegram/bot-api.ts`, `lib/telegram/message-text.ts`, `lib/telegram/rich-send.ts`, `lib/telegram/runtime.ts`, `lib/automations/notify.ts`.
+- [todo.md](docs/agents/todo.md): the built-in todo list: TodoWrite/TodoRead snapshot tools, the details envelope, per-session branch replay, rpiv-todo plugin suppression, client-side snapshot derivation and the read-only panel above the composer. Files: `lib/todo-extension.ts`, `lib/todo-state.ts`, `lib/todo-panel-prefs.ts`, `components/TodoPanel.tsx`, the mounts in `components/ChatWindow.tsx`, `components/SubagentViewer.tsx`, `components/SharedSessionView.tsx`, `BUILTIN_EXTENSION_NAMES` in `lib/builtin-extensions.ts`, the `extensionsOverride` chain in `lib/rpc-manager.ts`.
 
 ---
 

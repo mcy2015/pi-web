@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { MessageView } from "./MessageView";
+import { TodoPanel } from "./TodoPanel";
 import { StatusIcon, statusColor } from "./AgentSessionPanel";
 import { buildToolResultsMap, EMPTY_TRANSCRIPT, mergeTailPage, prependOlderPage, type SubagentTranscript } from "./subagent-viewer-state";
 import { useI18n } from "@/hooks/useI18n";
 import type { SessionInfo } from "@/lib/types";
+import { deriveTodoState } from "@/lib/todo-state";
 
 interface Props {
   sessionId: string;
@@ -177,6 +179,7 @@ export function SubagentViewer({ sessionId, fallbackLabel, running, onOpenFile }
   }, [messages]);
 
   const toolResults = useMemo(() => buildToolResultsMap(messages), [messages]);
+  const todoSnapshot = useMemo(() => deriveTodoState(messages), [messages]);
   const relation = info?.relation?.kind === "subagent" ? info.relation : null;
   const status = running ? "running" as const : relation?.status ?? "completed" as const;
 
@@ -229,6 +232,8 @@ export function SubagentViewer({ sessionId, fallbackLabel, running, onOpenFile }
           </svg>
         </button>
       </div>
+
+      <TodoPanel snapshot={todoSnapshot} />
 
       <div
         ref={listRef}

@@ -18,6 +18,7 @@ import { createPiWebMcpTransportFactory } from "./mcp-transport";
 import { loadPiSdkInternals, type PiSdkInternals, type PiSdkInternalsResult } from "./pi-sdk-internals";
 import { mayReadProjectConfigNow } from "./project-trust";
 import { PROJECT_SETTINGS_MAX_BYTES, readRegularFileText } from "./regular-file";
+import { createTodoExtension } from "./todo-extension";
 
 // The built-in extensions the pi CLI prepends from a module the SDK does not
 // export (ADR 0006, "Loading"). Normal sessions load them under the CLI's
@@ -226,7 +227,7 @@ export function createMcpExtensionConfigLoader(
 // Whether the settings switch a built-in off
 // ---------------------------------------------------------------------------
 
-export const BUILTIN_EXTENSION_NAMES = ["codemode", "tool-search", "mcp"] as const;
+export const BUILTIN_EXTENSION_NAMES = ["codemode", "tool-search", "mcp", "todo"] as const;
 export type BuiltinExtensionName = typeof BUILTIN_EXTENSION_NAMES[number];
 
 export interface BuiltinExtensionSwitch {
@@ -471,7 +472,11 @@ export async function createPiWebBuiltinExtensions(
     ...(options.mcpHost ? { mcpHost: options.mcpHost } : {}),
   });
   return {
-    extensions: [builtin("codemode", sandbox.available ? createCodemodeExtension() : unavailableExtension), ...extensions],
+    extensions: [
+      builtin("codemode", sandbox.available ? createCodemodeExtension() : unavailableExtension),
+      builtin("todo", createTodoExtension()),
+      ...extensions,
+    ],
     mcpHost,
   };
 }
