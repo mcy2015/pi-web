@@ -29,6 +29,13 @@ import {
   type TelegramConfig,
 } from "./config-store";
 import { resetChatSession, runChatTurn, withChatWrapper, type TelegramUiRequest, type TurnImage, type TurnInput } from "./session-bridge";
+import { handleModelCommand, handleThinkCommand, applyModelMenuSelection } from "./command-model";
+import { handleReplyCommand, applyReplyMenuSelection } from "./command-reply";
+import { handleProjectCommand, applyProjectMenuSelection } from "./command-project";
+import { handleTaskCommand, applyTaskMenuSelection } from "./command-task";
+import { classifyDocument, buildDocumentPrompt } from "./attachments";
+import { readChatReplyMode, type ReplyMode } from "./prefs";
+import { MENU_CANCEL_INDEX, parseMenuCallback, TelegramMenuRegistry } from "./menus";
 import { markdownToTelegramHtml, TELEGRAM_MESSAGE_LIMIT } from "./message-text";
 import { sendMarkdownText, finalizePreviewRich } from "./rich-send";
 import type { TelegramStatus } from "./types";
@@ -172,6 +179,11 @@ const NATIVE_COMMANDS: { command: string; description: string }[] = [
   { command: "new", description: "Start a fresh session" },
   { command: "stop", description: "Stop the running turn" },
   { command: "status", description: "Is a turn running?" },
+  { command: "model", description: "Switch the model" },
+  { command: "think", description: "Set the thinking level" },
+  { command: "reply", description: "Reply detail: stream, final, or tools" },
+  { command: "project", description: "Switch this chat's folder" },
+  { command: "task", description: "Switch to an earlier session" },
   { command: "name", description: "Name this chat's session" },
   { command: "compact", description: "Compact the session context" },
   { command: "help", description: "What this bot can do" },
@@ -208,7 +220,12 @@ const HELP_TEXT = [
   "/name <title> — name (or rename) the session",
   "/compact — compact the session context",
   "/status — is a turn running?",
-  "Photos run with vision. A message sent while a turn runs is queued as its follow-up.",
+  "/model — switch this chat's model",
+  "/think — set the thinking level",
+  "/reply — streaming, final-only, or with a tool digest",
+  "/project — switch this chat's working folder",
+  "/task — switch to an earlier session in this folder",
+  "Photos run with vision; small text files are read into the prompt. A message sent while a turn runs is queued as its follow-up.",
   "In groups I only answer messages that mention me or reply to me.",
 ].join("\n");
 
@@ -286,6 +303,11 @@ interface PendingUi {
 }
 const pendingUi = new Map<string, PendingUi>();
 
+// The pending inline menus (/model, /think, /reply, /project, /task): one
+// per chat and kind, replaced by every fresh issue and expiring on their
+// own, so a stale button press never acts on old data.
+const menuRegistry = new TelegramMenuRegistry();
+
 function buttonsFor(request: TelegramUiRequest): InlineButton[][] {
   if (request.method === "confirm") {
     return [
@@ -324,6 +346,10 @@ async function offerUiRequest(token: string, chatId: number, request: TelegramUi
 
 async function handleCallbackQuery(token: string, callbackQuery: NonNullable<TelegramUpdate["callback_query"]>): Promise<void> {
   const data = callbackQuery.data ?? "";
+  if (data.startsWith("m:")) {
+    await handleMenuCallback(token, callbackQuery);
+    return;
+  }
   if (!data.startsWith("ui:")) {
     await answerCallbackQuery(token, callbackQuery.id).catch(() => {});
     return;
@@ -363,14 +389,86 @@ async function handleCallbackQuery(token: string, callbackQuery: NonNullable<Tel
   await editMessageText(token, pending.chatId, pending.messageId, `✓ Chosen: ${chosenLabel}`).catch(() => {});
 }
 
+// ---- Inline menus (/model, /think, /reply, /project, /task): a pressed button applies its stored option. ----
+
+async function handleMenuCallback(token: string, callbackQuery: NonNullable<TelegramUpdate["callback_query"]>): Promise<void> {
+  const parsed = parseMenuCallback(callbackQuery.data ?? "");
+  const chatId = callbackQuery.message?.chat.id;
+  if (!parsed || chatId === undefined) {
+    await answerCallbackQuery(token, callbackQuery.id).catch(() => {});
+    return;
+  }
+  const pending = menuRegistry.take(chatId, parsed.kind, parsed.token);
+  if (!pending) {
+    // Expired, replaced by a newer menu of the kind, or a stale token.
+    await answerCallbackQuery(token, callbackQuery.id, "Expired").catch(() => {});
+    return;
+  }
+  if (parsed.index === MENU_CANCEL_INDEX) {
+    await answerCallbackQuery(token, callbackQuery.id, "Cancelled").catch(() => {});
+    await editMessageText(token, chatId, pending.messageId, "✓ Cancelled").catch(() => {});
+    return;
+  }
+  const kind = parsed.kind;
+  if (kind !== "model" && kind !== "think" && kind !== "reply" && kind !== "project" && kind !== "task") {
+    await answerCallbackQuery(token, callbackQuery.id).catch(() => {});
+    return;
+  }
+  const config = readTelegramConfig();
+  const outcome = await (async (): Promise<{ applied: boolean; text: string } | null> => {
+    if (kind === "reply") return applyReplyMenuSelection(chatId, parsed.index, pending.options);
+    if (kind === "project") return applyProjectMenuSelection(chatId, config, parsed.index, pending.options);
+    if (kind === "task") return applyTaskMenuSelection(chatId, config, parsed.index, pending.options);
+    return applyModelMenuSelection(chatId, config, kind, parsed.index, pending.options);
+  })().catch(
+    (error): null => {
+      console.warn(`[pi-web] telegram chat ${chatId}: applying a menu choice failed: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    },
+  );
+  if (outcome === null) {
+    await answerCallbackQuery(token, callbackQuery.id, "Expired").catch(() => {});
+    return;
+  }
+  if (outcome.applied) {
+    await answerCallbackQuery(token, callbackQuery.id, "✓").catch(() => {});
+    await editMessageText(token, chatId, pending.messageId, `✓ ${outcome.text}`).catch(() => {});
+    return;
+  }
+  // A notice (a running turn, a failed switch) answers the toast with itself,
+  // so the press still gets feedback even if the edit is rate-limited away.
+  await answerCallbackQuery(token, callbackQuery.id, outcome.text).catch(() => {});
+  await editMessageText(token, chatId, pending.messageId, outcome.text).catch(() => {});
+}
+
 // ---- Turn dispatch: preview lifecycle + media + approvals. ----
 
-function dispatchTurn(token: string, chatId: number, input: TurnInput): void {
+function dispatchTurn(token: string, chatId: number, input: TurnInput, replyMode: ReplyMode = readChatReplyMode(chatId)): void {
   // Not awaited: pi queues a prompt sent mid-run as a follow-up turn, so the
   // polling loop stays free for /stop and other chats.
   const turn = (async () => {
     const config = readTelegramConfig();
-    const outcome = await runChatTurn(chatId, input, config, () => sendChatAction(token, chatId));
+    // Tools mode counts the turn's top-level calls (nested codemode calls
+    // are folded into their parent's own result) for the digest line.
+    const toolCounts = replyMode === "tools" ? new Map<string, number>() : null;
+    let outcome = await runChatTurn(
+      chatId,
+      toolCounts !== null
+        ? {
+            ...input,
+            onToolCall: (toolName, nested) => {
+              if (!nested) toolCounts.set(toolName, (toolCounts.get(toolName) ?? 0) + 1);
+            },
+          }
+        : input,
+      config,
+      () => sendChatAction(token, chatId),
+    );
+    if (!outcome.error && toolCounts !== null && toolCounts.size > 0) {
+      // First-seen order; a single call collapses to the bare tool name.
+      const digest = [...toolCounts].map(([name, count]) => (count === 1 ? name : `${name} ×${count}`)).join(", ");
+      outcome = { ...outcome, reply: `${outcome.reply}\n\n🔧 Tools: ${digest}` };
+    }
     const preview = previewOf(chatId);
     if (outcome.error) {
       const errorText = `❌ ${outcome.error}`;
@@ -449,6 +547,41 @@ async function dispatchPhoto(token: string, chatId: number, message: TelegramMes
   dispatchTurn(token, chatId, { text: message.caption?.trim() || "Look at this image.", images });
 }
 
+/** Documents: images run with vision, small text files are inlined into the prompt, the rest are refused without a download. */
+async function dispatchDocument(token: string, chatId: number, message: TelegramMessage, mode: ReplyMode = readChatReplyMode(chatId)): Promise<void> {
+  const doc = message.document;
+  if (!doc) return;
+  const classification = classifyDocument({ fileName: doc.file_name, mimeType: doc.mime_type, fileSize: doc.file_size });
+  if (classification.kind === "unsupported") {
+    // Known before any download, so a refusal costs one reply and no traffic.
+    await reply(token, chatId, classification.reason === "size"
+      ? "❌ The file is over 1 MB — send only small text files or photos."
+      : "❌ I can only read text files and images. This file type is not supported.");
+    return;
+  }
+  await sendChatAction(token, chatId).catch(() => {});
+  let bytes: Buffer;
+  let mimeType: string | null;
+  try {
+    ({ bytes, mimeType } = await downloadFile(token, doc.file_id));
+  } catch (error) {
+    await reply(token, chatId, `❌ Downloading the file failed: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+  if (classification.kind === "image") {
+    const images: TurnImage[] = [{
+      type: "image",
+      data: bytes.toString("base64"),
+      mimeType: mimeType && mimeType.startsWith("image/") ? mimeType : "image/jpeg",
+    }];
+    dispatchTurn(token, chatId, { text: message.caption?.trim() || "Look at this file.", images }, mode);
+    return;
+  }
+  // A lossy UTF-8 read is acceptable: binary files never get this far.
+  const { prompt } = buildDocumentPrompt(doc.file_name ?? "file.txt", bytes.toString("utf8"), message.caption?.trim() ?? "");
+  dispatchTurn(token, chatId, { text: prompt }, mode);
+}
+
 /** Voice: transcribed through a local OpenAI-compatible endpoint when one runs. */
 async function dispatchVoice(token: string, chatId: number, message: TelegramMessage): Promise<void> {
   const voice = message.voice;
@@ -521,6 +654,10 @@ async function handleUpdate(token: string, update: TelegramUpdate): Promise<void
     await dispatchPhoto(token, chatId, message);
     return;
   }
+  if (message.document) {
+    await dispatchDocument(token, chatId, message);
+    return;
+  }
   if (text === "") return;
 
   if (text === "/start" || text === "/help") {
@@ -580,6 +717,26 @@ async function handleUpdate(token: string, update: TelegramUpdate): Promise<void
     await reply(token, chatId, running ? `⏳ ${which} Later messages queue as follow-ups.` : `💤 ${which}`);
     return;
   }
+  if (text === "/model" || text.startsWith("/model ")) {
+    await handleModelCommand(token, chatId, config, text.slice("/model".length).trim(), menuRegistry);
+    return;
+  }
+  if (text === "/think") {
+    await handleThinkCommand(token, chatId, config, menuRegistry);
+    return;
+  }
+  if (text === "/reply") {
+    await handleReplyCommand(token, chatId, config, menuRegistry);
+    return;
+  }
+  if (text === "/project") {
+    await handleProjectCommand(token, chatId, config, menuRegistry);
+    return;
+  }
+  if (text === "/task") {
+    await handleTaskCommand(token, chatId, config, menuRegistry);
+    return;
+  }
   if (text.startsWith("/")) {
     await reply(token, chatId, "Unknown command.\n\n" + HELP_TEXT);
     return;
@@ -588,20 +745,33 @@ async function handleUpdate(token: string, update: TelegramUpdate): Promise<void
     // The turn still resolving gets this message queued behind it by pi.
     await sendChatAction(token, chatId).catch(() => {});
   }
-  void ensurePreviewMessage(token, chatId, "…");
-  dispatchTurn(token, chatId, {
-    text,
-    onProgress: (partial) => {
-      const preview = previewOf(chatId);
-      const shown = partial.length > TELEGRAM_MESSAGE_LIMIT - 10
-        ? `${partial.slice(0, TELEGRAM_MESSAGE_LIMIT - 12)}…\n▍`
-        : `${partial}\n▍`;
-      if (preview.messageId === null || previewWantsEdit(preview, shown)) {
-        void editPreview(token, chatId, shown);
-      }
+  // The reply mode is read once at dispatch: final-only turns send no
+  // preview message and stream nothing — the completed reply arrives as one
+  // message (the same path photo and voice turns already take).
+  const replyMode = readChatReplyMode(chatId);
+  if (replyMode !== "final") void ensurePreviewMessage(token, chatId, "…");
+  dispatchTurn(
+    token,
+    chatId,
+    {
+      text,
+      ...(replyMode !== "final"
+        ? {
+            onProgress: (partial: string) => {
+              const preview = previewOf(chatId);
+              const shown = partial.length > TELEGRAM_MESSAGE_LIMIT - 10
+                ? `${partial.slice(0, TELEGRAM_MESSAGE_LIMIT - 12)}…\n▍`
+                : `${partial}\n▍`;
+              if (preview.messageId === null || previewWantsEdit(preview, shown)) {
+                void editPreview(token, chatId, shown);
+              }
+            },
+          }
+        : {}),
+      onUiRequest: (request) => {
+        void offerUiRequest(token, chatId, request);
+      },
     },
-    onUiRequest: (request) => {
-      void offerUiRequest(token, chatId, request);
-    },
-  });
+    replyMode,
+  );
 }

@@ -36,6 +36,8 @@ export interface TurnInput {
   images?: TurnImage[];
   /** Streaming preview: the assistant text accumulated so far. */
   onProgress?: (text: string) => void;
+  /** A tool call started; nested = a call made inside another tool (codemode). */
+  onToolCall?: (toolName: string, nested: boolean) => void;
   /** A blocking extension dialog asking for a decision (approvals). */
   onUiRequest?: (request: TelegramUiRequest) => void;
 }
@@ -51,10 +53,12 @@ export interface RunOutcome {
 }
 
 // The per-chat setup gate. Module state is fine: a hot reload simply resets
-// it, at worst letting two setups race once.
+// it, at worst letting two setups race once. Exported for /task's rebind: it
+// must hold the same serialization as the bind/reopen phase below, or a
+// message arriving mid-switch could interleave its own bind with ours.
 const chatGates = new Map<string, Promise<void>>();
 
-async function withChatGate<T>(chatId: number, operation: () => Promise<T>): Promise<T> {
+export async function withChatGate<T>(chatId: number, operation: () => Promise<T>): Promise<T> {
   const key = String(chatId);
   const previous = chatGates.get(key) ?? Promise.resolve();
   let release!: () => void;
@@ -95,6 +99,11 @@ async function resolveSessionCwd(config: TelegramConfig, chatId: number): Promis
   // The dated default directory, the same "Use default directory" the new
   // session bar offers. mkdir before pi sees it.
   return makeCwd(defaultCwdPath());
+}
+
+/** The cwd the chat's session runs in (the resolution openBoundSession applies), for listings that must match the session's project. */
+export async function resolveChatCwd(config: TelegramConfig, chatId: number): Promise<string | null> {
+  return resolveSessionCwd(config, chatId);
 }
 
 async function openBoundSession(
@@ -217,6 +226,11 @@ export async function runChatTurn(
           // The streaming preview: pi's accumulated partial assistant text.
           const streamed = (event as { assistantMessageEvent?: { partial?: unknown } }).assistantMessageEvent?.partial;
           if (typeof streamed === "string" && streamed.trim() !== "") input.onProgress?.(streamed);
+        } else if (event.type === "tool_execution_start") {
+          const toolName = (event as { toolName?: unknown }).toolName;
+          if (typeof toolName === "string") {
+            input.onToolCall?.(toolName, (event as { parentToolCallId?: unknown }).parentToolCallId !== undefined);
+          }
         } else if (event.type === "prompt_done") {
           if ((event as { aborted?: boolean }).aborted) aborted = true;
           settleDone();

@@ -26,6 +26,8 @@ export interface TelegramMessage {
   text?: string;
   /** Photo sizes, smallest first; the last is the original resolution. */
   photo?: { file_id: string; file_unique_id: string; width: number; height: number; file_size?: number }[];
+  /** A file sent as a document — distinct from photos, which arrive in `photo`. */
+  document?: { file_id: string; file_unique_id: string; file_name?: string; mime_type?: string; file_size?: number };
   voice?: { file_id: string; mime_type?: string; duration?: number };
   caption?: string;
   reply_to_message?: TelegramMessage;

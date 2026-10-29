@@ -15,6 +15,7 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { serializeByKey } from "../key-serializer";
 import { readRegularFileText } from "../regular-file";
 import type { TelegramAllowedChat } from "./types";
+import type { ReplyMode } from "./prefs";
 
 const MAX_BYTES = 1024 * 1024;
 
@@ -60,6 +61,8 @@ export interface TelegramRuntimeState {
   /** Chat id (as string, for JSON keys) → its pi session. */
   chats: Record<string, TelegramChatBinding>;
   lastUnknownChat: { id: number; title: string | null; at: number } | null;
+  /** Chat id (as string) → its reply granularity; absent entry = "stream". */
+  replyModes?: Record<string, ReplyMode>;
 }
 
 export const EMPTY_CONFIG: TelegramConfig = { token: "", enabled: false, defaultCwd: null, allowedChats: [] };
@@ -204,6 +207,8 @@ export function readTelegramConfig(path = channelsConfigPath()): TelegramConfig 
   return parseTelegramConfig(raw.telegram);
 }
 
+const REPLY_MODE_VALUES: ReadonlySet<string> = new Set(["stream", "final", "tools"]);
+
 export function parseTelegramState(raw: unknown): TelegramRuntimeState {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return { ...EMPTY_STATE, chats: {} };
   const record = raw as Record<string, unknown>;
@@ -228,7 +233,22 @@ export function parseTelegramState(raw: unknown): TelegramRuntimeState {
         at: typeof (unknownRaw as { at?: unknown }).at === "number" ? (unknownRaw as { at: number }).at : 0,
       }
     : null;
-  return { offset, chats, lastUnknownChat };
+  const replyModes: Record<string, ReplyMode> = {};
+  if (typeof record.replyModes === "object" && record.replyModes !== null && !Array.isArray(record.replyModes)) {
+    // Lenient like the chat bindings: numeric chat keys, the three modes only.
+    for (const [key, value] of Object.entries(record.replyModes)) {
+      if (/^-?\d+$/.test(key) && typeof value === "string" && REPLY_MODE_VALUES.has(value)) {
+        replyModes[key] = value as ReplyMode;
+      }
+    }
+  }
+  return {
+    offset,
+    chats,
+    lastUnknownChat,
+    // An empty field stays absent, keeping EMPTY_STATE-shaped states clean.
+    ...(Object.keys(replyModes).length > 0 ? { replyModes } : {}),
+  };
 }
 
 export function readTelegramState(path = channelsStatePath()): TelegramRuntimeState {
