@@ -6,6 +6,7 @@
 
 import { readTelegramConfig } from "../telegram/config-store";
 import { sendMarkdownText } from "../telegram/rich-send";
+import { TelegramApiError } from "../telegram/bot-api";
 import type { AutomationModel, RunStatus } from "./store";
 
 export interface AutomationOutcome {
@@ -43,6 +44,22 @@ function outcomeHeader(automation: AutomationModel, outcome: AutomationOutcome):
   return `✅ ${automation.name} · ${stamp} · ${duration}`;
 }
 
+/** Backoff between announce attempts. The Bot API path (this host reaches it
+ * through a router-level proxy) drops for minutes at a time — evening
+ * congestion — while an API 4xx answer (bad request, chat gone) never heals. */
+const NOTIFY_RETRY_DELAYS_MS: readonly number[] = [15_000, 30_000, 60_000];
+
+/** The wait before the next attempt, or null when the error is final. */
+export function notifyRetryDelayMs(attempt: number, error: unknown): number | null {
+  if (attempt >= NOTIFY_RETRY_DELAYS_MS.length) return null;
+  if (error instanceof TelegramApiError) {
+    const status = error.statusCode;
+    // Only the API's own rejections are permanent; network failures carry null.
+    if (status !== null && status !== 429 && status < 500) return null;
+  }
+  return NOTIFY_RETRY_DELAYS_MS[attempt];
+}
+
 /** Delivers the outcome to every notify channel; never throws. */
 export async function pushRunOutcome(automation: AutomationModel, outcome: AutomationOutcome): Promise<void> {
   const targets = automation.notifyChannels;
@@ -57,9 +74,22 @@ export async function pushRunOutcome(automation: AutomationModel, outcome: Autom
     : outcomeHeader(automation, outcome);
   for (const target of targets) {
     if (target.type !== "telegram") continue;
+    const attempts = NOTIFY_RETRY_DELAYS_MS.length + 1;
     try {
-      // Rich when the reply holds a table (Telegram renders it), else chunks.
-      await sendMarkdownText(config.token, target.chatId, text);
+      for (let attempt = 0; ; attempt++) {
+        try {
+          // Rich when the reply holds a table (Telegram renders it), else chunks.
+          await sendMarkdownText(config.token, target.chatId, text);
+          break;
+        } catch (error) {
+          const delay = notifyRetryDelayMs(attempt, error);
+          if (delay === null) throw error;
+          console.warn(
+            `[pi-web] automation "${automation.name}": notifying telegram chat ${target.chatId} failed (attempt ${attempt + 1}/${attempts}), retrying in ${Math.round(delay / 1000)}s: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
     } catch (error) {
       console.warn(`[pi-web] automation "${automation.name}": notifying telegram chat ${target.chatId} failed: ${error instanceof Error ? error.message : String(error)}`);
       break;

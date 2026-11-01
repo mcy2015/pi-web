@@ -14,6 +14,8 @@ Files: `lib/telegram/bot-api.ts`, `lib/telegram/message-text.ts`, `lib/telegram/
 
 A rich attempt failing as `TelegramApiError` (old endpoint, dialect parse error) falls through to the next layer, never losing the message. The streaming preview edits plain/HTML mid-stream and, on the turn's final text, tries `editMessageText` with `rich_message` first (`finalizePreviewRich()`); editing a text-mode message into a rich one works (verified live, 2026-10-27).
 
+The automations announce (`lib/automations/notify.ts`) additionally retries a failed delivery: the Bot API path (this host reaches it through a router-level proxy) drops for minutes at a time — the evening briefings of 2026-10-30/31 were both lost that way at 20:03, mornings fine. `notifyRetryDelayMs()` backs off 15s/30s/60s between attempts, but only for network-level failures (`TelegramApiError.statusCode === null`) and 5xx/429; an API 4xx (bad request, chat gone) is final. Safe because `fireAutomation` runs detached from the ticker and the run record is persisted before the announce.
+
 ## Traps
 
 - **Rich Markdown reads `_text_` as italic.** A bare `snake_case` token loses its underscores; `protectUnderscoresForRichMarkdown()` turns such words into code spans (path characters included, so `~/pi-cwd/2026_10_27` is covered) while code spans, fenced blocks, links and `_italic_`/`__bold__` markers keep theirs. Words glued to full-width punctuation are still caught (the pass works per word inside each whitespace token, not per token).
