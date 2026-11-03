@@ -4,6 +4,8 @@ import type { FileViewerDisplayMode, FileViewerState } from "@/lib/file-viewer-s
 /** Where the /files page keeps its cwd (localStorage) and tabs (sessionStorage). */
 export const FILES_PAGE_CWD_KEY = "pi-web:files-page-cwd";
 export const FILES_PAGE_TABS_KEY = "pi-web:files-page-tabs";
+/** Terminal tabs of the /files page: the app's shape, the page's own key. */
+export const FILES_PAGE_TERMINAL_TABS_KEY = "pi-web:files-page-terminal-tabs";
 
 const DISPLAY_MODES: readonly string[] = ["source", "preview", "diff"];
 

@@ -6,14 +6,17 @@ import { useSearchParams } from "next/navigation";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { FileViewer } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
+import { TerminalPanel } from "./TerminalPanel";
 import { openFileTab, saveFileViewerState } from "./file-tab-state";
 import {
   FILES_PAGE_TABS_KEY,
+  FILES_PAGE_TERMINAL_TABS_KEY,
   readStoredFilesPageCwd,
   restoreFilesPageTabs,
   saveStoredFilesPageCwd,
 } from "./files-page-state";
-import { ChangesIcon, EyeIcon, RefreshIcon, SearchIcon, UploadIcon } from "./SidebarIcons";
+import { newTerminalTab, restoreTerminalTabs, type TerminalTab } from "./terminal-tab-state";
+import { ChangesIcon, EyeIcon, RefreshIcon, SearchIcon, TerminalIcon, UploadIcon } from "./SidebarIcons";
 import { useI18n } from "@/hooks/useI18n";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
 import type { FileViewerState } from "@/lib/file-viewer-state";
@@ -68,7 +71,9 @@ export function FilesPage() {
   const [cwd, setCwd] = useState<string | null>(urlCwd);
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [terminalTabs, setTerminalTabs] = useState<TerminalTab[]>([]);
   const [restored, setRestored] = useState(false);
+  const [terminalsRestored, setTerminalsRestored] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [changesCollapsed, setChangesCollapsed] = useState(false);
   const [showIgnored, setShowIgnored] = useState(false);
@@ -113,7 +118,17 @@ export function FilesPage() {
       setTabs(stored.tabs);
       setActiveTabId(stored.activeTabId);
     }
+    try {
+      const savedTerminals = restoreTerminalTabs(sessionStorage.getItem(FILES_PAGE_TERMINAL_TABS_KEY));
+      setTerminalTabs(savedTerminals.tabs);
+      // The terminal store's activeId is the last active tab of either kind;
+      // an URL-named file still wins over what the last visit left active.
+      if (!urlPath && savedTerminals.activeId) setActiveTabId(savedTerminals.activeId);
+    } catch {
+      // Storage is optional.
+    }
     setRestored(true);
+    setTerminalsRestored(true);
     // The URL params are constant for the page's life; restore runs once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -126,6 +141,18 @@ export function FilesPage() {
       // The page keeps working without persistence.
     }
   }, [tabs, activeTabId, restored]);
+
+  useEffect(() => {
+    if (!terminalsRestored) return;
+    try {
+      sessionStorage.setItem(FILES_PAGE_TERMINAL_TABS_KEY, JSON.stringify({
+        tabs: terminalTabs.map(({ id, cwd }) => ({ id, cwd })),
+        activeId: activeTabId,
+      }));
+    } catch {
+      // Storage is optional.
+    }
+  }, [terminalTabs, activeTabId, terminalsRestored]);
 
   useEffect(() => {
     if (!restored || !cwd) return;
@@ -151,6 +178,24 @@ export function FilesPage() {
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
 
+  const panelTabs: Tab[] = [
+    ...tabs,
+    ...terminalTabs.map((tab) => ({
+      id: tab.id,
+      label: getFileName(tab.cwd) || tab.cwd,
+      filePath: tab.cwd,
+      kind: "terminal" as const,
+      closing: Boolean(tab.closing),
+    })),
+  ];
+
+  const openTerminal = useCallback((dir: string) => {
+    const existing = terminalTabs.find((tab) => tab.cwd === dir);
+    const tab = existing ?? newTerminalTab(dir);
+    if (!existing) setTerminalTabs((all) => [...all, tab]);
+    setActiveTabId(tab.id);
+  }, [terminalTabs]);
+
   const handleViewerStateChange = useCallback((state: FileViewerState) => {
     if (!activeTab) return;
     const revision = activeTab.viewerRevision ?? 0;
@@ -158,6 +203,11 @@ export function FilesPage() {
   }, [activeTab]);
 
   const handleCloseTab = useCallback((tabId: string) => {
+    if (terminalTabs.some((tab) => tab.id === tabId)) {
+      // Marked, not removed: TerminalPanel finishes and reports back onClosed.
+      setTerminalTabs((all) => all.map((tab) => tab.id === tabId && !tab.closing ? { ...tab, closing: "close" } : tab));
+      return;
+    }
     const index = tabs.findIndex((tab) => tab.id === tabId);
     if (index === -1) return;
     const next = tabs.filter((tab) => tab.id !== tabId);
@@ -165,9 +215,25 @@ export function FilesPage() {
     // Closing the active tab selects its neighbour, not the far end.
     setActiveTabId((current) => {
       if (current !== tabId) return current;
-      return next[Math.min(index, next.length - 1)]?.id ?? null;
+      return next[Math.min(index, next.length - 1)]?.id ?? terminalTabs.at(-1)?.id ?? null;
     });
-  }, [tabs]);
+  }, [tabs, terminalTabs]);
+
+  // TerminalPanel's closing lifecycle: restart swaps the tab, an exit removes it.
+  const handleTerminalClosed = useCallback((tab: TerminalTab) => {
+    const replacement = tab.closing === "restart" ? newTerminalTab(tab.cwd) : null;
+    const remaining = terminalTabs.filter((item) => item.id !== tab.id);
+    setTerminalTabs((all) => all.flatMap((item) => item.id !== tab.id ? [item] : replacement ? [replacement] : []));
+    setActiveTabId((current) => current !== tab.id ? current : replacement?.id ?? remaining.at(-1)?.id ?? tabs.at(-1)?.id ?? null);
+  }, [terminalTabs, tabs]);
+
+  const handleTerminalRestart = useCallback((tabId: string) => {
+    setTerminalTabs((all) => all.map((item) => item.id === tabId ? { ...item, closing: "restart" } : item));
+  }, []);
+
+  const handleTerminalCloseError = useCallback((tabId: string) => {
+    setTerminalTabs((all) => all.map((item) => item.id === tabId ? { ...item, closing: undefined } : item));
+  }, []);
 
   if (!cwd) {
     return (
@@ -219,6 +285,12 @@ export function FilesPage() {
         >
           {cwd}
         </span>
+        <ToolButton
+          label={t("terminal.open")}
+          onClick={() => openTerminal(cwd)}
+        >
+          <TerminalIcon size={16} />
+        </ToolButton>
         <ToolButton
           label={t("sidebar.searchFiles")}
           pressed={fileSearchOpen}
@@ -300,7 +372,7 @@ export function FilesPage() {
           >
             <div style={{ flex: 1, overflow: "hidden" }}>
               <TabBar
-                tabs={tabs}
+                tabs={panelTabs}
                 activeTabId={activeTabId ?? ""}
                 onSelectTab={setActiveTabId}
                 onCloseTab={handleCloseTab}
@@ -321,11 +393,22 @@ export function FilesPage() {
                 onStateChange={handleViewerStateChange}
                 onOpenFile={(filePath, page) => openFile(filePath, getFileName(filePath), { page })}
               />
-            ) : (
+            ) : !terminalTabs.some((tab) => tab.id === activeTabId) ? (
               <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
                 {t("files.noneOpen")}
               </div>
-            )}
+            ) : null}
+            {terminalTabs.map((tab) => (
+              <div key={tab.id} hidden={tab.id !== activeTabId} style={{ width: "100%", height: "100%" }}>
+                <TerminalPanel
+                  tab={tab}
+                  active={tab.id === activeTabId}
+                  onRestart={() => handleTerminalRestart(tab.id)}
+                  onClosed={() => handleTerminalClosed(tab)}
+                  onCloseError={() => handleTerminalCloseError(tab.id)}
+                />
+              </div>
+            ))}
           </div>
         </div>
       </div>

@@ -258,7 +258,7 @@ components/
   McpAddServer.tsx         Settings › MCP add pane: paste, preview, values, name, scope
   mcp-add-helpers.ts       pure helpers and the add request for McpAddServer
   FileExplorer.tsx         file tree in the sidebar
-  FilesPage.tsx            the fork-local /files route: FileExplorer + the right panel's tab machinery, state in components/files-page-state.ts
+  FilesPage.tsx            the fork-local /files route: FileExplorer + the right panel's tab machinery (file and terminal tabs), state in components/files-page-state.ts
   FileIcons.tsx            file icon helpers
   FileViewer.tsx           file content in a tab
   DelimitedTable.tsx       a CSV/TSV file's Preview: virtualized table, gutter of file lines
