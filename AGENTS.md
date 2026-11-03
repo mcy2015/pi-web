@@ -38,6 +38,7 @@ pi's packages depend on each other with `^` ranges, and the published pi-web's d
 
 ```
 app/share/[code]/page.tsx         GET the public, login-free share page: server component, no API
+app/files/page.tsx                GET the file panel as its own route (fork-local, components/FilesPage.tsx; proxy-matched, web password)
 app/api/
   sessions/route.ts                GET list all sessions
   sessions/[id]/route.ts           GET/PATCH/DELETE a session
@@ -240,6 +241,7 @@ components/
   McpAddServer.tsx         Settings › MCP add pane: paste, preview, values, name, scope
   mcp-add-helpers.ts       pure helpers and the add request for McpAddServer
   FileExplorer.tsx         file tree in the sidebar
+  FilesPage.tsx            the fork-local /files route: FileExplorer + the right panel's tab machinery, state in components/files-page-state.ts
   FileIcons.tsx            file icon helpers
   FileViewer.tsx           file content in a tab
   DelimitedTable.tsx       a CSV/TSV file's Preview: virtualized table, gutter of file lines

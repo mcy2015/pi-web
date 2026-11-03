@@ -1219,6 +1219,17 @@ export function AppShell() {
     handleOpenFile(filePath, getFileName(filePath), { sourceSessionId: selectedSession?.id ?? null, page });
   }, [handleOpenFile, selectedSession?.id]);
 
+  // The /files page of its own: same cwd, and the open file when the active
+  // tab is one (a terminal, agent or graph tab carries no file to show).
+  const handleOpenFilesPage = useCallback(() => {
+    const params = new URLSearchParams();
+    if (activeCwd) params.set("cwd", activeCwd);
+    const openTab = fileTabs.find((tab) => tab.id === activeFileTabId);
+    if (openTab?.filePath) params.set("path", openTab.filePath);
+    const query = params.toString() !== "" ? `?${params.toString()}` : "";
+    window.open(`/files${query}`, "_blank", "noopener");
+  }, [activeCwd, activeFileTabId, fileTabs]);
+
   const handleOpenTerminal = useCallback((cwd: string) => {
     const existing = terminalTabs.find((tab) => tab.cwd === cwd);
     const tab = existing ?? newTerminalTab(cwd);
@@ -2771,6 +2782,19 @@ export function AppShell() {
               onCloseTab={handleCloseFileTab}
             />
           </div>
+          <button
+            type="button"
+            className="file-panel-expand-button"
+            onClick={handleOpenFilesPage}
+            title={translate("files.openInPage")}
+            aria-label={translate("files.openInPage")}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M14 3h7v7" />
+              <path d="M21 3l-9 9" />
+              <path d="M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5" />
+            </svg>
+          </button>
           <button
             type="button"
             className="file-panel-expand-button"
