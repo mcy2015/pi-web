@@ -1,4 +1,5 @@
-import { StringEnum, Type } from "@earendil-works/pi-ai";
+import { StringEnum } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import {
   defineTool,
   type ExtensionFactory,
@@ -172,9 +173,9 @@ export function createTodoExtension(): ExtensionFactory {
           };
         }
         const todos: TodoItem[] = params.todos.map((todo) => ({
-          content: todo.content,
-          status: todo.status,
-          priority: todo.priority ?? "medium",
+          content: String(todo.content),
+          status: todo.status as TodoItem["status"],
+          priority: (todo.priority ?? "medium") as TodoItem["priority"],
         }));
         sessions.set(sid(ctx), todos);
         return {

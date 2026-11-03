@@ -14,6 +14,7 @@ import {
   parseGitPorcelainV1,
   type GitPorcelainEntry,
 } from "./git-status";
+import { resolveExistingPath } from "./paths";
 
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 10_000;
@@ -118,14 +119,20 @@ export async function getGitStatus(cwd: string): Promise<GitStatusResponse> {
     };
   }
 
+  // Git names the repository by its real path, while the cwd may reach it through a
+  // link (`/tmp` and `/var/folders/…` are links on macOS): compare real paths, and
+  // report each file under the cwd as given, the way the file tree lists it.
+  const realRoot = resolveExistingPath(repositoryRoot);
+  const realCwd = resolveExistingPath(cwd);
   const [entries, trackedStats] = await Promise.all([
     readStatusEntries(repositoryRoot),
-    readTrackedFileLineStats(repositoryRoot, cwd),
+    readTrackedFileLineStats(realRoot, realCwd),
   ]);
   let untrackedAdditions = 0;
   const files = entries.flatMap((entry): GitFileStatus[] => {
-    const filePath = path.resolve(repositoryRoot, entry.path);
-    if (!isWithinPath(cwd, filePath)) return [];
+    const realFilePath = path.resolve(realRoot, entry.path);
+    if (!isWithinPath(realCwd, realFilePath)) return [];
+    const filePath = path.join(cwd, path.relative(realCwd, realFilePath));
     const classified = classifyGitStatus(entry);
     const originalPath = entry.originalPath
       ? path.resolve(repositoryRoot, entry.originalPath)
@@ -142,7 +149,7 @@ export async function getGitStatus(cwd: string): Promise<GitStatusResponse> {
         ...(originalPath && originalPath !== filePath ? { originalPath } : {}),
       }];
     }
-    const stats = trackedStats.byPath.get(filePath);
+    const stats = trackedStats.byPath.get(realFilePath);
     return [{
       filePath,
       ...classified,
@@ -224,15 +231,21 @@ async function findFileRepositoryRoot(cwd: string, filePath: string): Promise<st
 
 export async function getGitFileDiff(cwd: string, filePath: string): Promise<GitFileDiffResponse> {
   const repositoryRoot = await findFileRepositoryRoot(cwd, filePath);
-  if (!repositoryRoot || !isWithinPath(repositoryRoot, filePath)) return { supported: false };
+  if (!repositoryRoot) return { supported: false };
+  // Git names the repository by its real path, while the file and the cwd may be named
+  // through a link: compare real paths. A file whose real path leaves the repository
+  // stays out; the route has already checked that real path against the allowed roots.
+  const realRoot = resolveExistingPath(repositoryRoot);
+  const realFilePath = resolveExistingPath(filePath);
+  if (!isWithinPath(realRoot, realFilePath)) return { supported: false };
   // Reading the index runs a repository-configured fsmonitor hook. Opening a
   // file in another checkout (one nested in the cwd, say) must not run its hook,
   // as expanding that folder in the file tree does not (lib/file-tree-visibility.ts);
   // the cwd's own repository keeps its fsmonitor.
-  const gitConfig = isWithinPath(repositoryRoot, cwd) ? [] : ["-c", "core.fsmonitor=false"];
+  const gitConfig = isWithinPath(realRoot, resolveExistingPath(cwd)) ? [] : ["-c", "core.fsmonitor=false"];
 
   const resolvedFilePath = path.resolve(filePath);
-  const relativePath = toGitPath(path.relative(repositoryRoot, resolvedFilePath));
+  const relativePath = toGitPath(path.relative(realRoot, realFilePath));
   const entries = await readStatusEntries(repositoryRoot, gitConfig);
   const entry = entries.find((candidate) => candidate.path === relativePath);
   if (!entry) return { supported: false };

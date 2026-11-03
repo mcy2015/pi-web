@@ -9,7 +9,7 @@ export interface Tab {
   id: string;
   label: string;
   filePath: string;
-  kind?: "terminal" | "agent" | "git-graph";
+  kind?: "terminal" | "agent" | "side" | "git-graph";
   closing?: boolean;
   sourceSessionId?: string | null;
   initialDisplayMode?: FileViewerDisplayMode;
@@ -64,14 +64,14 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
       className="tabbar-scroll"
       style={{
         // The scrollbar is hidden (globals.css): it would take its height out
-        // of the 36px bar, squeezing the tabs or clipping their tops (#1225).
+        // of the bar (--top-bar-height), squeezing the tabs or clipping their tops (#1225).
         display: "flex",
         alignItems: "stretch",
         background: "var(--bg-panel)",
         overflowX: "auto",
         overflowY: "hidden",
         flexShrink: 0,
-        height: 36,
+        height: "var(--top-bar-height)",
       }}
     >
       {tabs.map((tab) => {
@@ -80,7 +80,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
           <div
             key={tab.id}
             role="tab"
-            aria-label={tab.kind === "terminal" ? t("terminal.tabLabel", { name: tab.label }) : tab.kind === "agent" ? t("subagent.tabLabel", { name: tab.label }) : tab.kind === "git-graph" ? t("gitGraph.tabLabel", { name: tab.label }) : tab.label}
+            aria-label={tab.kind === "terminal" ? t("terminal.tabLabel", { name: tab.label }) : tab.kind === "agent" ? t("subagent.tabLabel", { name: tab.label }) : tab.kind === "git-graph" ? t("gitGraph.tabLabel", { name: tab.label }) : tab.kind === "side" ? t("sideChat.tabLabel") : tab.label}
             aria-selected={isActive}
             tabIndex={isActive || (!activeTabId && tabs[0].id === tab.id) ? 0 : -1}
             onKeyDown={(event) => {
@@ -138,6 +138,10 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
               ) : tab.kind === "git-graph" ? (
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <circle cx="5" cy="6" r="2.5" /><circle cx="5" cy="18" r="2.5" /><circle cx="19" cy="12" r="2.5" /><path d="M5 8.5v7" /><path d="M7.5 6H12a7 7 0 0 1 7 7v.01" /><path d="M7.5 18H12" />
+                </svg>
+              ) : tab.kind === "side" ? (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M21 12a8 8 0 0 1-8 8H5.5a2 2 0 0 1-1.4-3.4A8 8 0 1 1 21 12z" />
                 </svg>
               ) : getFileIcon(tab.label, 13)}
             </span>
