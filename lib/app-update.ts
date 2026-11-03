@@ -10,7 +10,11 @@ function repositoryWebUrl(pkg: { repository?: unknown } = packageJson): string {
   return url.replace(/^git\+/, "").replace(/\.git$/, "");
 }
 
-export function getNpmLatestUrl(packageName: string = packageJson.name): string {
+/** This fork checks the upstream package for update notices: a newer upstream version is the cue to sync the fork, while the fork's own npm line (@mcy2015/pi-web) releases separately. */
+export const UPSTREAM_PACKAGE = "@agegr/pi-web";
+export const UPSTREAM_REPO_URL = "https://github.com/agegr/pi-web";
+
+export function getNpmLatestUrl(packageName: string = UPSTREAM_PACKAGE): string {
   return `https://registry.npmjs.org/${encodeURIComponent(packageName)}/latest`;
 }
 
@@ -36,7 +40,7 @@ export function isNewerStableVersion(candidate: string, current: string): boolea
   return false;
 }
 
-export function getPiWebReleaseUrl(version: string): string | null {
+export function getPiWebReleaseUrl(version: string, repoWebUrl: string = repositoryWebUrl()): string | null {
   if (!parseStableVersion(version)) return null;
-  return `${repositoryWebUrl()}/releases/tag/v${version}`;
+  return `${repoWebUrl}/releases/tag/v${version}`;
 }
