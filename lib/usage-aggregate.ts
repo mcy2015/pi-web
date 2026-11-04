@@ -61,6 +61,7 @@ export interface UsageFileAggregate {
   fingerprint: string;
   sessionId: string;
   cwd: string | null;
+  sessionActiveMs: number;
   days: Map<string, DayBucket>;
 }
 
@@ -151,6 +152,8 @@ export interface FoldedSession {
   sessionId: string;
   cwd: string | null;
   isSubagent: boolean;
+  /** The session's whole active time (sum of its day buckets). */
+  sessionActiveMs: number;
   days: Map<string, DayBucket>;
 }
 
@@ -278,6 +281,7 @@ export function foldSessionLines(header: unknown, lines: readonly string[]): Fol
     sessionId: typeof head.id === "string" ? head.id : "",
     cwd: typeof head.cwd === "string" ? head.cwd : null,
     isSubagent: typeof head.parentSession === "string" && head.parentSession !== "",
+    sessionActiveMs: [...days.values()].reduce((acc, day) => acc + day.activeMs, 0),
     days,
   };
 }
@@ -307,7 +311,7 @@ function streaks(activeDates: Set<string>, todayKey: string): { current: number;
 
 /** Merge folded files into the API snapshot for one range. Exported for tests. */
 export function mergeUsageSnapshot(
-  files: readonly { sessionId: string; cwd: string | null; days: Map<string, DayBucket> }[],
+  files: readonly { sessionId: string; cwd: string | null; sessionActiveMs?: number; days: Map<string, DayBucket> }[],
   range: UsageRangeDays,
   meta: { files: number; skipped: number },
   now: Date = new Date(),
@@ -341,6 +345,14 @@ export function mergeUsageSnapshot(
       day.activeMs += bucket.activeMs;
       for (let h = 0; h < 24; h++) day.hours[h]! += bucket.hours[h]!;
       for (const [model, usage] of bucket.models) {
+        const dayRow = day.models.get(model) ?? emptyModel();
+        dayRow.input += usage.input;
+        dayRow.output += usage.output;
+        dayRow.cacheRead += usage.cacheRead;
+        dayRow.cacheWrite += usage.cacheWrite;
+        dayRow.total += usage.total;
+        dayRow.cost += usage.cost;
+        day.models.set(model, dayRow);
         const row = models.get(model) ?? { model, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, cost: 0, share: 0 };
         row.input += usage.input;
         row.output += usage.output;
@@ -386,6 +398,8 @@ export function mergeUsageSnapshot(
 
   const modelRows = [...models.values()].sort((a, b) => b.total - a.total || a.model.localeCompare(b.model));
   for (const row of modelRows) row.share = tokens.total > 0 ? row.total / tokens.total : 0;
+  // The trend chart draws one line per model: the range's top 6.
+  const trendModelKeys = new Set(modelRows.slice(0, 6).map((row) => row.model));
   const toolRows = [...tools.entries()]
     .map(([name, count]): UsageToolRow => ({ name, count }))
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
@@ -398,6 +412,12 @@ export function mergeUsageSnapshot(
   const daily: UsageDailyRow[] = [];
   for (let key = fromKey; key <= todayKey; key = nextDayKey(key)) {
     const day = merged.get(key);
+    const dayModels: Record<string, number> = {};
+    if (day) {
+      for (const [model, usage] of day.models) {
+        if (trendModelKeys.has(model)) dayModels[model] = (dayModels[model] ?? 0) + usage.total;
+      }
+    }
     daily.push({
       date: key,
       input: day?.input ?? 0,
@@ -407,8 +427,11 @@ export function mergeUsageSnapshot(
       total: day?.total ?? 0,
       cost: day?.cost ?? 0,
       messages: day?.messages ?? 0,
+      models: dayModels,
     });
   }
+  const peakDayTokens = daily.reduce((acc, day) => Math.max(acc, day.total), 0);
+  const longestSessionActiveMs = files.reduce((acc, file) => Math.max(acc, file.sessionActiveMs ?? 0), 0);
 
   const cacheDenominator = tokens.cacheRead + tokens.input;
   let peakHour: number | null = null;
@@ -432,6 +455,8 @@ export function mergeUsageSnapshot(
       sessions: sessionActive.size,
       messages,
       activeDays: activeDates.size,
+      peakDayTokens,
+      longestSessionActiveMs,
       topModel: modelRows[0] ? { model: modelRows[0].model, share: modelRows[0].share } : null,
       totalActiveMs,
     },
@@ -502,6 +527,7 @@ async function foldFile(info: SessionInfo): Promise<UsageFileAggregate | null> {
     fingerprint: stable ? fp! : `${fp!}:unstable`,
     sessionId: folded.sessionId || info.id,
     cwd: folded.cwd ?? info.cwd,
+    sessionActiveMs: folded.sessionActiveMs,
     days: folded.days,
   };
 }
@@ -576,6 +602,7 @@ export async function getUsageSnapshot(options: { range?: UsageRangeDays; force?
   const list = [...files.values()].map((aggregate) => ({
     sessionId: aggregate.sessionId,
     cwd: aggregate.cwd,
+    sessionActiveMs: aggregate.sessionActiveMs,
     days: aggregate.days,
   }));
   return mergeUsageSnapshot(list, range, meta, new Date());

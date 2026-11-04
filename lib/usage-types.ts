@@ -47,6 +47,8 @@ export interface UsageDailyRow {
   total: number;
   cost: number;
   messages: number;
+  /** Tokens per model for this day, for the range's top 6 models only. */
+  models: Record<string, number>;
 }
 
 export interface UsageSnapshot {
@@ -68,6 +70,12 @@ export interface UsageSnapshot {
     sessions: number;
     messages: number;
     activeDays: number;
+    /** The busiest local day's tokens inside the range (ZCode's peak-day figure). */
+    peakDayTokens: number;
+    /** Longest single session's active time, over all sessions regardless of
+     * the range (a session spans days; ZCode's overview bar uses the all-time
+     * snapshot for this figure). */
+    longestSessionActiveMs: number;
     topModel: { model: string; share: number } | null;
     totalActiveMs: number;
   };
