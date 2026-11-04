@@ -100,6 +100,7 @@ test("a project switch still drops subagent tabs but saves the current side tabs
     sideTabOwnerRef: { current: "main-a" },
     sideTabsSavedOnWorkspaceSwitchRef: { current: false },
     switchFileWorkspace: () => ({ tabs: [], activeTabId: null, open: false }),
+    setGitGraphTabs() {},
     rememberSideTabs(key) { store.set(key, context.agentTabs.filter((tab) => tab.side)); },
     setFileWorkspaceGeneration() {}, setFileTabs() {},
     setAgentTabs(update) { context.agentTabs = update(context.agentTabs); },

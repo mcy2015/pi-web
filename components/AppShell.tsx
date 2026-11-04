@@ -1361,6 +1361,23 @@ export function AppShell() {
     if (isMobile) setSidebarOpen(false);
   }, [isMobile]);
 
+  // The agent switcher's side-panel button: opens a subagent's tab, or closes
+  // it when the open panel already has it (the panel closes with its last tab).
+  // The switcher stays open beside the panel, except on phones, where the
+  // panel covers the chat.
+  const openSubagentTabIds = useMemo(
+    () => new Set(rightPanelOpen ? agentTabs.map((tab) => tab.sessionId) : []),
+    [agentTabs, rightPanelOpen],
+  );
+  const handleToggleSubagentTab = (sessionId: string, label: string, side?: boolean) => {
+    if (openSubagentTabIds.has(sessionId)) {
+      handleCloseFileTab(`agent:${sessionId}`);
+      return;
+    }
+    if (isMobile) setActiveTopPanel(null);
+    handleOpenSubagentTab(sessionId, label, side);
+  };
+
   // The Agent card's "enter" action: the subagent's own chat becomes the main
   // one, as the agent switcher's row click does. The family listing usually
   // holds the child's SessionInfo already; a run too new for it falls back to
@@ -1387,23 +1404,6 @@ export function AppShell() {
       }
     })();
   }, [activeSessionFamily, handleSelectSession, handleOpenSubagentTab]);
-
-  // The agent switcher's side-panel button: opens a subagent's tab, or closes
-  // it when the open panel already has it (the panel closes with its last tab).
-  // The switcher stays open beside the panel, except on phones, where the
-  // panel covers the chat.
-  const openSubagentTabIds = useMemo(
-    () => new Set(rightPanelOpen ? agentTabs.map((tab) => tab.sessionId) : []),
-    [agentTabs, rightPanelOpen],
-  );
-  const handleToggleSubagentTab = (sessionId: string, label: string, side?: boolean) => {
-    if (openSubagentTabIds.has(sessionId)) {
-      handleCloseFileTab(`agent:${sessionId}`);
-      return;
-    }
-    if (isMobile) setActiveTopPanel(null);
-    handleOpenSubagentTab(sessionId, label, side);
-  };
 
   // `/side` landed (hooks/useAgentSession): open the forked chat's tab, seed
   // its composer when the command carried a prompt, and refresh the list so

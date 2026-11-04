@@ -11,7 +11,7 @@ import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { loadModelsWithCache, withModelRuntimeError, type ModelsData } from "@/lib/models-cache";
 import { orderSelectorModels, resolveVisibleModels, selectInitialModelScope } from "@/lib/model-scope";
 import { projectTrustReloadOptions } from "@/lib/project-trust";
-import { rememberProviderModels, withDeferredProviderModels } from "@/lib/deferred-provider-models";
+import { providerDisplayNames, rememberProviderModels, withDeferredProviderModels } from "@/lib/deferred-provider-models";
 
 export interface ChatModelList {
   models: { id: string; name: string; provider: string }[];
@@ -22,7 +22,7 @@ export interface ChatModelList {
 // Mirrors loadModels in app/api/models/route.ts; keep the two in step.
 async function loadChatModels(cwd: string): Promise<ModelsData> {
   const nameMap = new Map<string, string>();
-  let modelList: { id: string; name: string; provider: string }[] = [];
+  let modelList: { id: string; name: string; provider: string; providerName: string; input?: string[] }[] = [];
   let defaultModel: { provider: string; modelId: string } | null = null;
   const thinkingLevels: Record<string, string[]> = {};
   const thinkingLevelMaps: Record<string, Record<string, string | null>> = {};
@@ -40,6 +40,7 @@ async function loadChatModels(cwd: string): Promise<ModelsData> {
   const modelError = services.modelRuntime.getError();
   const settings: SettingsManager = services.settingsManager;
   await rememberProviderModels(services.modelRuntime);
+  const providerNames = providerDisplayNames(services.modelRuntime);
   // `enabledModels` supports globs and fuzzy patterns, so resolve it the same
   // way the CLI does instead of comparing pattern strings literally (#307).
   const scope = await resolveVisibleModels(
@@ -51,6 +52,7 @@ async function loadChatModels(cwd: string): Promise<ModelsData> {
     id: m.id,
     name: m.name,
     provider: m.provider,
+    providerName: providerNames.get(m.provider) ?? m.provider,
     input: m.input,
   }));
   for (const m of visible) {
