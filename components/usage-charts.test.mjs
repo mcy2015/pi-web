@@ -69,12 +69,12 @@ test("buildHeatmapWeeks anchors 52 weeks ending at the latest day with usage", (
     days.push({ date: key(d), input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: back % 2 ? 100 : 0, cost: 0, messages: back % 2 ? 3 : 0 });
   }
   const weeks = buildHeatmapWeeks(days);
-  assert.equal(weeks.length, 52);
+  assert.equal(weeks.length, 78);
   for (const week of weeks) assert.equal(week.length, 7);
   // The last week holds the latest day WITH USAGE (base - 1 here: base has none).
   const dayBeforeBase = new Date(base);
   dayBeforeBase.setDate(dayBeforeBase.getDate() - 1);
-  const lastWeek = weeks[51];
+  const lastWeek = weeks[weeks.length - 1];
   assert.ok(lastWeek.some((day) => day.date === key(dayBeforeBase)), "latest day with usage anchors the last week");
   // The window starts on a Sunday.
   const firstDay = new Date(weeks[0][0].date + "T00:00:00");
@@ -122,16 +122,14 @@ test("heatmapMonthGroups merges same-month columns and caps at 12 labels", () =>
   // First week holds 2026-02-01, so it is February despite starting in January.
   assert.equal(mixed[0].label, "Feb");
 
-  // More than 12 groups: the earlier labels blank out.
+  // Every month in the window keeps its label (no ZCode 12-label cap here).
   const many = [];
   for (let m = 0; m < 14; m++) {
     const date = new Date(2025, m, 5);
     const pad = (v) => (v < 10 ? `0${v}` : String(v));
     many.push(weekOf(`${date.getFullYear()}-${pad(date.getMonth() + 1)}-05`));
   }
-  const capped = heatmapMonthGroups(many, (key) => key.slice(0, 7));
-  assert.equal(capped.length, 14);
-  assert.equal(capped[0].label, "");
-  assert.equal(capped[1].label, "");
-  assert.notEqual(capped[13].label, "");
+  const labelled = heatmapMonthGroups(many, (key) => key.slice(0, 7));
+  assert.equal(labelled.length, 14);
+  for (const group of labelled) assert.notEqual(group.label, "");
 });

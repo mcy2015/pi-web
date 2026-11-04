@@ -247,7 +247,9 @@ export function UsageModelDonut({
 // ---------------------------------------------------------------------------
 
 export const HEAT_LEVELS = 4;
-export const HEATMAP_WEEKS = 52;
+/** A year and a half of weekly columns: ZCode uses 52 (one year); a full
+ * toolbar-wide panel renders those cells too large, so the window widens. */
+export const HEATMAP_WEEKS = 78;
 
 /** 0 (empty) .. HEAT_LEVELS. Exported for tests. */
 export function heatLevel(total: number, max: number): number {
@@ -352,8 +354,8 @@ export interface HeatmapMonthGroup {
 }
 
 /** Month labels under the grid (ZCode's pXn/lXn): a column names the day its
- * week starts a month with, same-month neighbours merge, at most 12 labels
- * (earlier ones blank). Exported for tests. */
+ * week starts a month with; same-month neighbours merge. Every month in the
+ * window gets its label. Exported for tests. */
 export function heatmapMonthGroups(
   weeks: readonly (readonly HeatmapDay[])[],
   labelOfMonth: (dateKey: string) => string,
@@ -367,8 +369,6 @@ export function heatmapMonthGroups(
     if (last && last.key === month) last.span += 1;
     else groups.push({ key: month, label: labelOfMonth(monthDate), span: 1 });
   }
-  const overflow = Math.max(0, groups.length - 12);
-  for (let i = 0; i < overflow; i++) groups[i]!.label = "";
   return groups;
 }
 

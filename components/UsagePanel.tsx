@@ -505,7 +505,7 @@ const USAGE_PANEL_CSS = `
   }
   .usage-heatmap-grid {
     display: grid;
-    grid-template-columns: repeat(52, minmax(0, 1fr));
+    grid-template-columns: repeat(78, minmax(0, 1fr));
     column-gap: 2px;
     width: 100%;
   }
@@ -537,7 +537,7 @@ const USAGE_PANEL_CSS = `
   }
   .usage-heatmap-months {
     display: grid;
-    grid-template-columns: repeat(52, minmax(0, 1fr));
+    grid-template-columns: repeat(78, minmax(0, 1fr));
     column-gap: 2px;
     margin-top: 5px;
   }
