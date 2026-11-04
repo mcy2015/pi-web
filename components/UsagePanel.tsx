@@ -301,16 +301,16 @@ const USAGE_PANEL_CSS = `
     min-height: 0;
     flex: 1;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
     overflow: auto;
-    padding: 12px 16px 14px;
+    padding: 8px 16px 10px;
     font-size: 12px;
     line-height: 1.5;
   }
   .usage-section {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 5px;
   }
   .usage-section-title {
     color: var(--text);
@@ -330,26 +330,26 @@ const USAGE_PANEL_CSS = `
   }
   .usage-stats {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
-    gap: 12px 20px;
-    padding: 2px 0;
+    grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+    gap: 6px 16px;
+    padding: 0;
   }
   .usage-stat {
     display: flex;
     min-width: 0;
     flex-direction: column;
-    gap: 1px;
+    gap: 0;
   }
   .usage-stat-value {
     color: var(--text);
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 650;
     font-variant-numeric: tabular-nums;
-    line-height: 1.25;
+    line-height: 1.35;
     overflow-wrap: anywhere;
   }
   .usage-stat-value.usage-stat-model {
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 650;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -358,44 +358,60 @@ const USAGE_PANEL_CSS = `
   .usage-stat-label {
     color: var(--text-dim);
     font-size: 11px;
+    line-height: 1.35;
   }
   .usage-inline {
-    margin: -2px 0 0;
+    margin: -4px 0 0;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: 11.5px;
   }
-  .usage-trend-chart {
+  .usage-trend {
+    position: relative;
+    padding-top: 14px;
+  }
+  .usage-trend-max {
+    position: absolute;
+    top: 0;
+    left: 0;
+    color: var(--text-dim);
+    font-size: 10px;
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+  }
+  .usage-trend-svg {
     width: 100%;
-    height: 130px;
+    height: 84px;
     display: block;
   }
   .usage-trend-line {
     stroke: var(--accent);
     stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
   }
   .usage-trend-area {
     fill: var(--accent);
     opacity: 0.12;
   }
-  .usage-trend-max,
+  .usage-trend-labels {
+    position: relative;
+    height: 14px;
+  }
   .usage-trend-label {
-    fill: var(--text-dim);
+    position: absolute;
+    top: 2px;
+    color: var(--text-dim);
     font-size: 10px;
+    line-height: 1.2;
+    white-space: nowrap;
   }
   .usage-heatmap {
     display: grid;
-    grid-auto-flow: column;
-    grid-template-rows: repeat(7, 10px);
-    grid-auto-columns: 10px;
-    gap: 2px;
-    overflow-x: auto;
-    padding: 2px 0 4px;
-    width: fit-content;
-    max-width: 100%;
+    gap: 1px;
+    height: 13px;
+    width: 100%;
   }
   .usage-heat-cell {
-    width: 10px;
-    height: 10px;
+    min-width: 0;
     border-radius: 2px;
     background: var(--bg-hover);
   }
@@ -415,7 +431,7 @@ const USAGE_PANEL_CSS = `
     grid-template-columns: minmax(110px, 240px) 1fr auto;
     align-items: center;
     gap: 10px;
-    padding: 2px 4px;
+    padding: 1px 2px;
     border-radius: 4px;
     font-size: 12px;
   }
@@ -429,7 +445,7 @@ const USAGE_PANEL_CSS = `
     white-space: nowrap;
   }
   .usage-bar-track {
-    height: 5px;
+    height: 4px;
     border-radius: 2px;
     background: var(--bg-hover);
     overflow: hidden;
@@ -446,7 +462,7 @@ const USAGE_PANEL_CSS = `
     white-space: nowrap;
   }
   .usage-footnote {
-    margin: 2px 0 0;
+    margin: 0;
     color: var(--text-dim);
     font-size: 11px;
   }

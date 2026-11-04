@@ -2209,6 +2209,7 @@ export function AppShell() {
           pointerEvents: covered ? "none" : "auto",
           background: activeTopPanel === "session" ? "var(--bg-selected)" : "none",
           border: "none",
+          ...(mobile ? {} : { borderLeft: "1px solid var(--border)" }),
           borderTop: activeTopPanel === "session" ? "2px solid var(--accent)" : "2px solid transparent",
           fontSize: 11, color: "var(--text-muted)",
           whiteSpace: "nowrap", cursor: showChat ? "pointer" : "default",
@@ -2301,8 +2302,8 @@ export function AppShell() {
     );
   };
 
-  // Icon only, right of the chat's actions; on a desktop it takes the bar's free space, so it
-  // sits left of the session stats. It only opens or closes its panel: nothing is loaded here.
+  // Icon only, in the right-aligned group beside the session's usage numbers (mobile: the
+  // toolbar row). It only opens or closes its panel: nothing is loaded here.
   const renderDebugButton = (mobile: boolean) => {
     if (!showChat) return null;
     const open = activeTopPanel === "debug";
@@ -2315,7 +2316,7 @@ export function AppShell() {
         aria-label={translate("debug.title")}
         aria-pressed={open}
         style={{
-          marginLeft: mobile ? 0 : "auto",
+          marginLeft: 0,
           display: "flex", alignItems: "center", justifyContent: "center",
           width: TOP_BAR_ICON_BUTTON_SIZE, height: "100%", padding: 0,
           background: open ? "var(--bg-selected)" : "none",
@@ -2360,7 +2361,7 @@ export function AppShell() {
           background: open ? "var(--bg-selected)" : "none",
           border: "none",
           borderTop: open ? "2px solid var(--accent)" : "2px solid transparent",
-          ...(mobile ? { borderRight: "1px solid var(--border)" } : { borderLeft: "1px solid var(--border)" }),
+          ...(mobile ? { borderRight: "1px solid var(--border)" } : {}),
           color: open ? "var(--text)" : "var(--text-muted)",
           cursor: "pointer", flexShrink: 0, transition: "color 0.1s, background 0.1s",
         }}
@@ -2666,14 +2667,15 @@ export function AppShell() {
               )}
             </div>
           )}
-          {!isMobile && (
-            <>
-              {renderProjectTrustWarning(false)}
-              {renderChatToolbarActions(false)}
+          {!isMobile && renderProjectTrustWarning(false)}
+          {!isMobile && renderChatToolbarActions(false)}
+          {/* Usage, Debug and the session's usage numbers share one right-aligned group. */}
+          {!isMobile && showChat && (
+            <div style={{ marginLeft: "auto", display: "flex", height: "100%", borderLeft: "1px solid var(--border)" }}>
               {renderUsageButton(false)}
               {renderDebugButton(false)}
               {renderSessionStatsButton(false)}
-            </>
+            </div>
           )}
           {!isMobile && renderMainFileToggle(false)}
           {isMobile && sessionHasBranches && (

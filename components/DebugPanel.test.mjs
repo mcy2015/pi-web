@@ -731,9 +731,10 @@ test("the Debug button only toggles its panel, left of the session stats", () =>
   assert.match(button, /if \(!showChat\) return null;/);
   assert.notEqual(enLocale.messages["debug.title"], enLocale.messages["session.title"], "e2e finds the stats button by its own name");
 
-  // Desktop: after the chat's actions (the Usage button beside it), right before the stats, taking the free space.
-  assert.match(shellSource, /\{renderChatToolbarActions\(false\)\}\s*\{renderUsageButton\(false\)\}\s*\{renderDebugButton\(false\)\}\s*\{renderSessionStatsButton\(false\)\}/);
-  assert.match(button, /marginLeft: mobile \? 0 : "auto"/);
+  // Desktop: after the chat's actions, the Usage/Debug/session-usage group right-aligned as one box.
+  assert.match(shellSource, /\{!isMobile && renderChatToolbarActions\(false\)\}\s*\{\/\* Usage, Debug and the session's usage numbers share one right-aligned group\. \*\/\}\s*\{!isMobile && showChat && \(\s*<div style=\{\{ marginLeft: "auto"[^}]*borderLeft: "1px solid var\(--border\)"/);
+  assert.match(shellSource, /\{renderUsageButton\(false\)\}\s*\{renderDebugButton\(false\)\}\s*\{renderSessionStatsButton\(false\)\}/);
+  assert.match(button, /marginLeft: 0,/);
   const stats = between(shellSource, "const renderSessionStatsButton = (mobile: boolean) => {", "const renderDebugButton");
   assert.match(stats, /\n\s*marginLeft: 0,/);
   assert.match(shellSource, /marginLeft: !mobile && !showChat \? "auto" : 0,/);

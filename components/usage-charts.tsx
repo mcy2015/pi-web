@@ -1,19 +1,12 @@
-// Pure-presentational charts of Settings › Usage (components/UsageConfig.tsx).
+// Pure-presentational charts of the Usage top panel (components/UsagePanel.tsx).
 // No i18n and no state here: labels and formatted values arrive as props, and
 // every chart is decorative (aria-hidden) with the readable detail in the
 // neighboring lists or in each cell's title.
 
 import type { UsageDailyRow } from "@/lib/usage-types";
 
-function nextDay(key: string): string {
-  const [y, m, d] = key.split("-").map(Number);
-  const date = new Date(y!, m! - 1, d! + 1);
-  const pad = (value: number) => (value < 10 ? `0${value}` : String(value));
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
-
 // ---------------------------------------------------------------------------
-// Trend chart (SVG polyline)
+// Trend chart (SVG lines stretched to the panel width, HTML labels on top)
 // ---------------------------------------------------------------------------
 
 export interface TrendPoint {
@@ -43,22 +36,27 @@ export function trendLabelIndexes(count: number, maxLabels = 5): number[] {
 }
 
 const TREND_W = 720;
-const TREND_H = 150;
+const TREND_H = 84;
+const TREND_PAD = 8;
 
 export function UsageTrendChart({ daily, formatCount, title }: { daily: readonly UsageDailyRow[]; formatCount: (value: number) => string; title: string }) {
   if (daily.length === 0) return null;
-  const points = trendPoints(daily, TREND_W, TREND_H);
+  const points = trendPoints(daily, TREND_W, TREND_H, TREND_PAD);
   const polyline = points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
-  const area = `8,${TREND_H - 2} ${polyline} ${TREND_W - 2},${TREND_H - 2}`;
+  const area = `${TREND_PAD},${TREND_H - 2} ${polyline} ${TREND_W - TREND_PAD},${TREND_H - 2}`;
   const max = Math.max(...daily.map((day) => day.total), 1);
   const labelIndexes = trendLabelIndexes(daily.length);
+  const columnWidth = TREND_W / daily.length + 1;
+  // The viewBox stretches to the panel's width (preserveAspectRatio="none"), so
+  // text lives in HTML above and below the SVG, never inside it; the stroke
+  // keeps its width through vector-effect.
   const hoverTargets = daily.length <= 400
     ? daily.map((day, index) => (
       <rect
         key={day.date}
-        x={points[index]!.x - (TREND_W / daily.length) / 2}
+        x={points[index]!.x - columnWidth / 2}
         y={0}
-        width={TREND_W / daily.length + 1}
+        width={columnWidth}
         height={TREND_H}
         fill="transparent"
       >
@@ -67,34 +65,45 @@ export function UsageTrendChart({ daily, formatCount, title }: { daily: readonly
     ))
     : null;
   return (
-    <svg
-      viewBox={`0 0 ${TREND_W} ${TREND_H}`}
-      className="usage-trend-chart"
-      role="img"
-      aria-label={title}
-      preserveAspectRatio="none"
-    >
-      <polygon points={area} className="usage-trend-area" />
-      <polyline points={polyline} className="usage-trend-line" fill="none" />
-      <text x={4} y={12} className="usage-trend-max">{formatCount(max)}</text>
-      {labelIndexes.map((index) => (
-        <text
-          key={index}
-          x={points[index]!.x}
-          y={TREND_H - 2}
-          textAnchor={index === 0 ? "start" : index === daily.length - 1 ? "end" : "middle"}
-          className="usage-trend-label"
-        >
-          {daily[index]!.date.slice(5)}
-        </text>
-      ))}
-      {hoverTargets}
-    </svg>
+    <div className="usage-trend">
+      <span className="usage-trend-max">{formatCount(max)}</span>
+      <svg
+        viewBox={`0 0 ${TREND_W} ${TREND_H}`}
+        className="usage-trend-svg"
+        role="img"
+        aria-label={title}
+        preserveAspectRatio="none"
+      >
+        <polygon points={area} className="usage-trend-area" />
+        <polyline points={polyline} className="usage-trend-line" fill="none" />
+        {hoverTargets}
+      </svg>
+      <div className="usage-trend-labels">
+        {labelIndexes.map((index) => {
+          const point = points[index]!;
+          const left = (point.x / TREND_W) * 100;
+          const align = index === 0 ? "start" : index === daily.length - 1 ? "end" : "center";
+          return (
+            <span
+              key={index}
+              className="usage-trend-label"
+              style={{
+                left: `${left}%`,
+                transform: align === "center" ? "translateX(-50%)" : align === "end" ? "translateX(-100%)" : undefined,
+                textAlign: align,
+              }}
+            >
+              {daily[index]!.date.slice(5)}
+            </span>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Heatmap (CSS grid, one column per week)
+// Heatmap (one full-width strip, one cell per day of the range)
 // ---------------------------------------------------------------------------
 
 export const HEAT_LEVELS = 4;
@@ -109,48 +118,30 @@ export function heatLevel(total: number, max: number): number {
   return HEAT_LEVELS;
 }
 
-function mondayOffset(key: string): number {
-  const [y, m, d] = key.split("-").map(Number);
-  const day = new Date(y!, m! - 1, d!).getDay(); // 0 = Sunday
-  return (day + 6) % 7; // 0 = Monday
-}
-
+/**
+ * One cell per day of the range — days without usage are level 0 — stretched
+ * to fill the panel's width (grid-template-columns: repeat(days, 1fr)).
+ */
 export function UsageHeatmap({ daily, formatCount }: { daily: readonly UsageDailyRow[]; formatCount: (value: number) => string }) {
   if (daily.length === 0) return null;
-  const byDate = new Map(daily.map((day) => [day.date, day]));
-  const first = daily[0]!.date;
-  const last = daily[daily.length - 1]!.date;
   const max = Math.max(...daily.map((day) => day.total), 1);
-
-  // Start at the Monday of the first day's week so columns align to weeks.
-  let cursor = first;
-  for (let i = 0; i < mondayOffset(first); i++) cursor = previousDay(cursor);
-  const cells: { date: string; day: UsageDailyRow | undefined; offset: number }[] = [];
-  let offset = 0;
-  while (cursor <= last) {
-    if (cursor >= first) cells.push({ date: cursor, day: byDate.get(cursor), offset });
-    cursor = nextDay(cursor);
-    offset += 1;
-  }
   return (
-    <div className="usage-heatmap" role="img" aria-hidden="true">
-      {cells.map((cell) => (
+    <div
+      className="usage-heatmap"
+      role="img"
+      aria-hidden="true"
+      style={{ gridTemplateColumns: `repeat(${daily.length}, 1fr)` }}
+    >
+      {daily.map((day) => (
         <span
-          key={cell.date}
+          key={day.date}
           className="usage-heat-cell"
-          data-level={cell.day ? heatLevel(cell.day.total, max) : 0}
-          title={cell.day ? `${cell.date} · ${formatCount(cell.day.total)}` : cell.date}
+          data-level={heatLevel(day.total, max)}
+          title={`${day.date} · ${formatCount(day.total)}`}
         />
       ))}
     </div>
   );
-}
-
-function previousDay(key: string): string {
-  const [y, m, d] = key.split("-").map(Number);
-  const date = new Date(y!, m! - 1, d! - 1);
-  const pad = (value: number) => (value < 10 ? `0${value}` : String(value));
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 // ---------------------------------------------------------------------------
