@@ -18,6 +18,7 @@ import { SystemPromptPanel } from "./SystemPromptPanel";
 import { ToolDefinitionsPanel } from "./ToolDefinitionsPanel";
 import { AgentSessionPanel } from "./AgentSessionPanel";
 import { DebugPanel, DebugPanelBoundary } from "./DebugPanel";
+import { UsagePanel } from "./UsagePanel";
 import { SessionChatPanel } from "./SessionChatPanel";
 import { TerminalPanel } from "./TerminalPanel";
 import { GitGraphPanel } from "./GitGraphPanel";
@@ -409,7 +410,7 @@ export function AppShell() {
   }, []);
 
   // Single active panel — only one dropdown open at a time
-  const [activeTopPanel, setActiveTopPanel] = useState<"agents" | "branches" | "system" | "tools" | "session" | "debug" | null>(null);
+  const [activeTopPanel, setActiveTopPanel] = useState<"agents" | "branches" | "system" | "tools" | "session" | "debug" | "usage" | null>(null);
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
   useEffect(() => {
@@ -429,7 +430,7 @@ export function AppShell() {
   }, [rightPanelFullWidth]);
 
   const toggleTopPanel = useCallback((
-    panel: "agents" | "branches" | "system" | "tools" | "session" | "debug",
+    panel: "agents" | "branches" | "system" | "tools" | "session" | "debug" | "usage",
     keepMobileToolbarOpen = false,
   ) => {
     if (isMobile) setSidebarOpen(false);
@@ -439,6 +440,8 @@ export function AppShell() {
 
   // The Debug button on screen (one of its three places at a time); Escape gives focus back to it.
   const debugButtonRef = useRef<HTMLButtonElement | null>(null);
+  // The Usage button beside it; Escape gives focus back the same way.
+  const usageButtonRef = useRef<HTMLButtonElement | null>(null);
 
   // Escape inside the debug panel; it never closes another panel that took its place. With focus
   // in the panel, that focus leaves the page with it: once the panel is gone (the next frame), the
@@ -446,6 +449,11 @@ export function AppShell() {
   const closeDebugPanel = useCallback((restoreFocus: boolean) => {
     setActiveTopPanel((panel) => panel === "debug" ? null : panel);
     if (restoreFocus) requestAnimationFrame(() => focusIfLost(document, debugButtonRef.current));
+  }, []);
+
+  const closeUsagePanel = useCallback((restoreFocus: boolean) => {
+    setActiveTopPanel((panel) => panel === "usage" ? null : panel);
+    if (restoreFocus) requestAnimationFrame(() => focusIfLost(document, usageButtonRef.current));
   }, []);
 
   const handleSystemInfoToggle = useCallback((
@@ -2334,6 +2342,43 @@ export function AppShell() {
     );
   };
 
+  // Icon only, beside the Debug button; same manners. The usage aggregates load in the panel.
+  const renderUsageButton = (mobile: boolean) => {
+    if (!showChat) return null;
+    const open = activeTopPanel === "usage";
+    return (
+      <button
+        ref={usageButtonRef}
+        type="button"
+        onClick={() => toggleTopPanel("usage", mobile)}
+        title={translate("usage.title")}
+        aria-label={translate("usage.title")}
+        aria-pressed={open}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center",
+          width: TOP_BAR_ICON_BUTTON_SIZE, height: "100%", padding: 0,
+          background: open ? "var(--bg-selected)" : "none",
+          border: "none",
+          borderTop: open ? "2px solid var(--accent)" : "2px solid transparent",
+          ...(mobile ? { borderRight: "1px solid var(--border)" } : { borderLeft: "1px solid var(--border)" }),
+          color: open ? "var(--text)" : "var(--text-muted)",
+          cursor: "pointer", flexShrink: 0, transition: "color 0.1s, background 0.1s",
+        }}
+        onMouseEnter={(event) => {
+          event.currentTarget.style.color = "var(--text)";
+        }}
+        onMouseLeave={(event) => {
+          event.currentTarget.style.color = open ? "var(--text)" : "var(--text-muted)";
+        }}
+        data-mobile-toolbar-action={mobile ? "usage" : undefined}
+      >
+        <svg width={mobile ? 16 : 13} height={mobile ? 16 : 13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={mobile ? 1.9 : 2} strokeLinecap="round" strokeLinejoin="round" style={{ color: open ? "var(--accent)" : "var(--text-dim)", flexShrink: 0 }} aria-hidden="true">
+          <path d="M5 20V10M12 20V4M19 20v-7" />
+        </svg>
+      </button>
+    );
+  };
+
   const renderMainFileToggle = (mobile: boolean) => {
     const covered = mobile && isNarrowMobile && mobileToolbarMoreOpen;
     return (
@@ -2585,6 +2630,7 @@ export function AppShell() {
                 </button>
               )}
               {!isNarrowMobile && renderChatToolbarActions(true)}
+              {!isNarrowMobile && renderUsageButton(true)}
               {!isNarrowMobile && renderDebugButton(true)}
               {renderSessionStatsButton(true)}
               {renderMainFileToggle(true)}
@@ -2614,6 +2660,7 @@ export function AppShell() {
                   }}
                 >
                   {renderChatToolbarActions(true)}
+                  {renderUsageButton(true)}
                   {renderDebugButton(true)}
                 </div>
               )}
@@ -2623,6 +2670,7 @@ export function AppShell() {
             <>
               {renderProjectTrustWarning(false)}
               {renderChatToolbarActions(false)}
+              {renderUsageButton(false)}
               {renderDebugButton(false)}
               {renderSessionStatsButton(false)}
             </>
@@ -2885,6 +2933,9 @@ export function AppShell() {
                     onClose={closeDebugPanel}
                   />
                 </DebugPanelBoundary>
+              )}
+              {activeTopPanel === "usage" && (
+                <UsagePanel onClose={closeUsagePanel} />
               )}
             </div>
           )}
