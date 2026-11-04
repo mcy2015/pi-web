@@ -7,6 +7,7 @@ export const SETTINGS_SECTION_VALUES = [
   "mcp",
   "channels",
   "automations",
+  "usage",
 ] as const;
 
 export type SettingsSection = (typeof SETTINGS_SECTION_VALUES)[number];
