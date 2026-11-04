@@ -46,6 +46,50 @@ export function trendLabelIndexes(count: number, maxLabels = 5): number[] {
   return [...indexes].sort((a, b) => a - b);
 }
 
+/**
+ * A monotone cubic (Fritsch-Carlson) path through the points — the smoothing
+ * recharts' `type: "monotone"` applies — so lines round off without spiking
+ * past their data. Exported for tests.
+ */
+export function monotonePath(points: readonly TrendPoint[]): string {
+  if (points.length === 0) return "";
+  if (points.length === 1) return `M ${points[0]!.x.toFixed(1)} ${points[0]!.y.toFixed(1)}`;
+
+  const n = points.length;
+  const slopes: number[] = [];
+  for (let i = 0; i < n - 1; i++) {
+    const dx = points[i + 1]!.x - points[i]!.x;
+    slopes.push(dx !== 0 ? (points[i + 1]!.y - points[i]!.y) / dx : 0);
+  }
+  const m: number[] = new Array<number>(n).fill(0);
+  m[0] = slopes[0]!;
+  m[n - 1] = slopes[n - 2]!;
+  for (let i = 1; i < n - 1; i++) {
+    const before = slopes[i - 1]!;
+    const after = slopes[i]!;
+    if (before * after <= 0) {
+      m[i] = 0; // local extremum: flat tangent, no overshoot
+    } else {
+      // The average tangent, clamped so the curve cannot overshoot its data.
+      m[i] = Math.min(
+        (before + after) / 2,
+        3 * Math.min(Math.abs(before), Math.abs(after)),
+      ) * (before < 0 ? -1 : 1);
+    }
+  }
+
+  let path = `M ${points[0]!.x.toFixed(1)} ${points[0]!.y.toFixed(1)}`;
+  for (let i = 0; i < n - 1; i++) {
+    const h = points[i + 1]!.x - points[i]!.x;
+    const x1 = points[i]!.x + h / 3;
+    const y1 = points[i]!.y + m[i]! * h / 3;
+    const x2 = points[i + 1]!.x - h / 3;
+    const y2 = points[i + 1]!.y - m[i + 1]! * h / 3;
+    path += ` C ${x1.toFixed(1)} ${y1.toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)} ${points[i + 1]!.x.toFixed(1)} ${points[i + 1]!.y.toFixed(1)}`;
+  }
+  return path;
+}
+
 const TREND_W = 720;
 const TREND_H = 96;
 const TREND_PAD = 8;
@@ -73,7 +117,7 @@ export function UsageTrendChart({
     return {
       model,
       color: chartColor(modelIndex),
-      polyline: points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" "),
+      path: monotonePath(points),
       some: values.some((value) => value > 0),
     };
   });
@@ -96,7 +140,7 @@ export function UsageTrendChart({
         preserveAspectRatio="none"
       >
         {lines.filter((line) => line.some).map((line) => (
-          <polyline key={line.model} points={line.polyline} className="usage-trend-line" stroke={line.color} fill="none" />
+          <path key={line.model} d={line.path} className="usage-trend-line" stroke={line.color} fill="none" />
         ))}
         {daily.length <= 400
           ? daily.map((day, index) => (

@@ -8,7 +8,7 @@ const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
   moduleCache: false,
 });
-const { trendPoints, trendLabelIndexes, heatLevel, buildHeatmapWeeks, heatmapBars, heatmapMonthGroups } = await jiti.import("./usage-charts.tsx");
+const { trendPoints, trendLabelIndexes, heatLevel, buildHeatmapWeeks, heatmapBars, heatmapMonthGroups, monotonePath } = await jiti.import("./usage-charts.tsx");
 
 
 test("trendPoints maps values into the padded viewBox", () => {
@@ -132,4 +132,21 @@ test("heatmapMonthGroups merges same-month columns and caps at 12 labels", () =>
   const labelled = heatmapMonthGroups(many, (key) => key.slice(0, 7));
   assert.equal(labelled.length, 14);
   for (const group of labelled) assert.notEqual(group.label, "");
+});
+
+test("monotonePath smooths without overshooting its data", () => {
+  assert.equal(monotonePath([]), "");
+  assert.equal(monotonePath([{ x: 3, y: 4 }]), "M 3.0 4.0");
+
+  // Two points degrade to a straight segment.
+  const line = monotonePath([{ x: 0, y: 0 }, { x: 10, y: 10 }]);
+  assert.ok(line.startsWith("M 0.0 0.0"));
+  assert.ok(line.includes("10.0 10.0"));
+
+  // A peak between two valleys gets a flat tangent there (no overshoot):
+  // the control points around the peak sit at its own y.
+  const peak = monotonePath([{ x: 0, y: 10 }, { x: 10, y: 0 }, { x: 20, y: 10 }]);
+  const ys = [...peak.matchAll(/([-\d.]+) ([-\d.]+)/g)].map((m) => Number(m[2]));
+  assert.ok(Math.max(...ys) <= 10, `overshoot: ${ys}`);
+  assert.ok(Math.min(...ys) >= 0, `undershoot: ${ys}`);
 });
