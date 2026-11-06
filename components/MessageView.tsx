@@ -3,12 +3,14 @@
 import { Fragment, memo, useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
 import ReactMarkdown from "react-markdown";
 import { MarkdownBody } from "./MarkdownBody";
+import { BtwNoteCard } from "./BtwNoteCard";
 import { ImagePreview } from "./ImagePreview";
 import { ThinkingIcon } from "./ThinkingIcon";
 import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
+import { BTW_NOTE_CUSTOM_TYPE, parseBtwNoteDetails } from "@/lib/btw-note";
 import { getAssistantErrorMessage, getThinkingPreview, hasAssistantAnswer, isAssistantTruncated, isEmptyThinkingBlock, splitThinkingPieces } from "@/lib/message-display";
 import { formatTurnDuration } from "@/lib/turn-duration";
 import { diffGapLabel, parseUnifiedPatch, unifiedDiffLines, type SplitDiffCell, type SplitDiffFile, type SplitDiffGap, type UnifiedDiffLine } from "@/lib/patch";
@@ -304,6 +306,14 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
   if (message.role === "custom") {
     if ((message as CustomMessage).customType === "compaction") {
       return <CompactionMessageView message={message as CustomMessage} />;
+    }
+    // A btw-note without parsable details (an older or broken entry) falls
+    // through to the generic custom message card.
+    if ((message as CustomMessage).customType === BTW_NOTE_CUSTOM_TYPE) {
+      const btwNote = parseBtwNoteDetails((message as CustomMessage).details);
+      if (btwNote) {
+        return <BtwNoteCard note={btwNote} cwd={cwd} onOpenFile={onOpenFile} />;
+      }
     }
     return <CustomMessageView message={message as CustomMessage} cwd={cwd} onOpenFile={onOpenFile} />;
   }

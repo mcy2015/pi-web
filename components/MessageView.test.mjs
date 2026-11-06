@@ -698,6 +698,53 @@ test("collapses a displayed custom message from its header alone", () => {
   );
 });
 
+test("renders a btw-note custom message as its own Q&A card", () => {
+  const html = renderMessage({
+    role: "custom",
+    customType: "btw-note",
+    display: true,
+    content: "**Question**\n\nWhat is 2+2?\n\n**Answer**\n\n**4**, as always.",
+    timestamp: Date.now(),
+    details: {
+      question: "What is 2+2?",
+      answer: "**4**, as always.",
+      thinking: "kept out of the card",
+      provider: "zai-coding-cn",
+      model: "glm-5.3",
+      usage: { input: 101, output: 76, totalTokens: 4913, cost: { total: 0.0017 } },
+    },
+  });
+
+  // The header row: tag, provider/model, compact tokens and cost.
+  assert.match(html, />btw</);
+  assert.match(html, /zai-coding-cn\/glm-5\.3/);
+  assert.match(html, /5k/);
+  assert.match(html, /&lt;\$0\.01/);
+  // The Q&A itself, each part under its label, the answer as Markdown.
+  assert.match(html, /Question<\/div>/);
+  assert.match(html, /What is 2\+2\?/);
+  assert.match(html, /Answer<\/div>/);
+  assert.match(html, /<strong>4<\/strong>, as always\./);
+  // No generic custom-message furniture on the card.
+  assert.doesNotMatch(html, /aria-expanded/);
+  assert.doesNotMatch(html, /Show details/);
+});
+
+test("a btw-note without parsable details falls back to the generic custom card", () => {
+  const html = renderMessage({
+    role: "custom",
+    customType: "btw-note",
+    display: true,
+    content: "**Question**\n\nWhat is 2+2?",
+    timestamp: Date.now(),
+  });
+
+  // The generic card: the type title on its collapsing header, the text kept.
+  assert.match(html, />btw-note</);
+  assert.match(html, /aria-expanded="true"/);
+  assert.match(html, /What is 2\+2\?/);
+});
+
 test("renders custom-message images as buttons that open a larger preview", () => {
   const html = renderMessage({
     role: "custom",

@@ -1936,6 +1936,8 @@ export const zhCNLocale: LocalePlugin = {
     "i18n.expand": "展开",
     "i18n.hideDetails": "隐藏详情",
     "i18n.showDetails": "显示详情",
+    "btw.question": "问题",
+    "btw.answer": "回答",
     "i18n.thinkingUnavailable": "思考内容不可用",
     "i18n.before": "之前",
     "i18n.after": "之后",
