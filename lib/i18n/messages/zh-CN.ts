@@ -904,6 +904,8 @@ export const zhCNLocale: LocalePlugin = {
     "transcriptNotice.foldCacheMisses": "缓存未命中 {count} 次 {tokens} Token{cost}",
     "settings.cacheMissNotices": "显示缓存与费用提示",
     "settings.cacheMissNoticesDescription": "即 pi 的 showCacheMissNotices：在对话中显示缓存未命中、缓存预热、压缩费用，以及 Anthropic 丢弃思考块。保存到全局 settings.json，项目的 .pi/settings.json 可以覆盖它。",
+    "settings.autoTitle": "自动命名会话",
+    "settings.autoTitleDescription": "第一个问题回答完毕后自动为会话生成标题。手动生成标题按钮不受影响，已命名的会话不会被覆盖。保存到 pi-web-settings.json，由服务端执行，Channels 与 Automations 的会话同样生效。",
     "chat.filesWritten": "改动的文件",
     "chat.openWrittenFile": "打开 {name}",
     "chat.loadEarlier": "向上滚动以加载更早的消息",

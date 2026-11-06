@@ -904,6 +904,8 @@ export const enLocale: LocalePlugin = {
     "transcriptNotice.foldCacheMisses": "{count} cache misses {tokens} tokens{cost}",
     "settings.cacheMissNotices": "Show cache and cost notices",
     "settings.cacheMissNoticesDescription": "pi's showCacheMissNotices: cache misses, cache warming, compaction cost and Anthropic dropping thinking blocks, in the chat. Saved to the global settings.json; a project's .pi/settings.json can override it.",
+    "settings.autoTitle": "Auto-name sessions",
+    "settings.autoTitleDescription": "Name a session automatically once its first answer completes. The manual title button keeps working; a name already set is never overwritten. Saved to pi-web-settings.json, server-side, so Channels and Automations sessions are named too.",
     "chat.filesWritten": "Files changed",
     "chat.openWrittenFile": "Open {name}",
     "chat.loadEarlier": "Scroll up to load earlier messages",

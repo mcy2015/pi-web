@@ -904,6 +904,8 @@ export const zhTWLocale: LocalePlugin = {
     "transcriptNotice.foldCacheMisses": "快取未命中 {count} 次 {tokens} Token{cost}",
     "settings.cacheMissNotices": "顯示快取與費用提示",
     "settings.cacheMissNoticesDescription": "即 pi 的 showCacheMissNotices：在對話中顯示快取未命中、快取預熱、壓縮費用，以及 Anthropic 捨棄思考區塊。儲存到全域 settings.json，專案的 .pi/settings.json 可以覆寫它。",
+    "settings.autoTitle": "自動命名會話",
+    "settings.autoTitleDescription": "第一個問題回答完畢後自動為會話生成標題。手動生成標題按鈕不受影響，已命名的會話不會被覆寫。儲存到 pi-web-settings.json，由伺服端執行，Channels 與 Automations 的會話同樣生效。",
     "chat.filesWritten": "已變更的檔案",
     "chat.openWrittenFile": "開啟 {name}",
     "chat.loadEarlier": "向上捲動以載入較早的訊息",

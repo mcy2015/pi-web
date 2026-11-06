@@ -21,6 +21,7 @@ import { cacheSessionPath, catalogFirstMessage, getLatestModelChange, invalidate
 import { computeLiveSessionTotalActiveMs } from "./session-timing";
 import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust";
 import { notifySessionComplete } from "./web-push";
+import { autoNameSessionAfterRun } from "./auto-session-title";
 import { hasActiveSessionLivenessProvider } from "./session-liveness";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionLike, ExtensionUiContextLike, ToolInfo } from "./pi-types";
@@ -3347,6 +3348,15 @@ export async function startRpcSession(
         void notifySessionComplete(completedSessionId, sessionName).catch((error) => {
           console.error("[pi-web] failed to send completion push:", error instanceof Error ? error.message : error);
         });
+        // The run settled with the task finished and this session was never named: give it its
+        // title now, after its first answer. Side chats and subagent sessions never reach here
+        // (their notifications are suppressed), and a failure only logs — it must not look like
+        // the run's.
+        if (sessionName === undefined) {
+          void autoNameSessionAfterRun(inner, { isAlive: () => wrapper.isAlive() }).catch((error) => {
+            console.warn("[pi-web] could not auto-name the session:", error instanceof Error ? error.message : error);
+          });
+        }
       },
       suppressCompletionNotifications: Boolean(subagentResources) || isSideChat,
       ...(subagentResources

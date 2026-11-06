@@ -94,6 +94,9 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
   const [cacheMissNotices, setCacheMissNotices] = useState<boolean | null>(null);
   const [cacheMissNoticesSaving, setCacheMissNoticesSaving] = useState(false);
   const [cacheMissNoticesError, setCacheMissNoticesError] = useState<string | null>(null);
+  const [autoTitle, setAutoTitle] = useState<boolean | null>(null);
+  const [autoTitleSaving, setAutoTitleSaving] = useState(false);
+  const [autoTitleError, setAutoTitleError] = useState<string | null>(null);
   const [pushRegistering, setPushRegistering] = useState(false);
   const [pushStatus, setPushStatus] = useState<{ kind: "ok" | "error"; message: string } | null>(null);
   const [webAuthEnabled, setWebAuthEnabled] = useState(false);
@@ -150,6 +153,20 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/auto-title")
+      .then(async (response) => {
+        const data = await response.json() as { enabled?: boolean; error?: string };
+        if (!response.ok || data.error) throw new Error(data.error ?? `HTTP ${response.status}`);
+        if (!cancelled) setAutoTitle(data.enabled === true);
+      })
+      .catch((cause) => {
+        if (!cancelled) setAutoTitleError(cause instanceof Error ? cause.message : String(cause));
+      });
+    return () => { cancelled = true; };
+  }, []);
+
   // pi's showCacheMissNotices (#1265); the open chat is read again to show or drop them.
   const toggleCacheMissNotices = async (enabled: boolean) => {
     setCacheMissNoticesSaving(true);
@@ -168,6 +185,26 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
       setCacheMissNoticesError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setCacheMissNoticesSaving(false);
+    }
+  };
+
+  // The auto-title switch (`/api/auto-title`): server-side, so Channels and Automations sessions are named too.
+  const toggleAutoTitle = async (enabled: boolean) => {
+    setAutoTitleSaving(true);
+    setAutoTitleError(null);
+    try {
+      const response = await fetch("/api/auto-title", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      const data = await response.json() as { enabled?: boolean; error?: string };
+      if (!response.ok || data.error) throw new Error(data.error ?? `HTTP ${response.status}`);
+      setAutoTitle(data.enabled === true);
+    } catch (cause) {
+      setAutoTitleError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setAutoTitleSaving(false);
     }
   };
 
@@ -383,9 +420,21 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
               onChange={(enabled) => void toggleCacheMissNotices(enabled)}
             />
           </div>
+          <div className="settings-chat-option settings-chat-switch-option">
+            <span>{t("settings.autoTitle")}</span>
+            <ConfigSwitch
+              checked={autoTitle !== false}
+              loading={(autoTitle === null && !autoTitleError) || autoTitleSaving}
+              label={t("settings.autoTitle")}
+              describedBy="settings-auto-title-description"
+              onChange={(enabled) => void toggleAutoTitle(enabled)}
+            />
+          </div>
         </div>
         <p id="settings-cache-miss-notices-description" className="settings-general-description">{t("settings.cacheMissNoticesDescription")}</p>
         {cacheMissNoticesError && <p role="alert" className="settings-general-error">{cacheMissNoticesError}</p>}
+        <p id="settings-auto-title-description" className="settings-general-description">{t("settings.autoTitleDescription")}</p>
+        {autoTitleError && <p role="alert" className="settings-general-error">{autoTitleError}</p>}
       </section>
 
       <section className="settings-general-section">

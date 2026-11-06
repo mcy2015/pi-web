@@ -1717,8 +1717,10 @@
   line-height: 1.5;
 }
 
-/* A note on the options above it, not an introduction to them. */
-.settings-chat-options + .settings-general-description {
+/* A note on the options above it, not an introduction to them; a second note
+   under a first (two switches, two notes) reads as one block of notes. */
+.settings-chat-options + .settings-general-description,
+.settings-general-description + .settings-general-description {
   margin: 6px 0 0;
 }
 
