@@ -147,6 +147,7 @@ export async function fireAutomation(
       name: `${automation.name} · ${runStamp()}`,
       reply: "",
       error,
+      sessionFile: null,
       startedAt: runStartedAt,
       durationMs: Date.now() - runStartedAt,
     }).catch(() => {});
@@ -227,6 +228,7 @@ export async function fireAutomation(
         name,
         reply: lastAssistantText,
         error: aborted ? "The turn was stopped" : null,
+        sessionFile: wrapper.sessionFile,
         startedAt: runStartedAt,
         durationMs: Date.now() - runStartedAt,
       }).catch(() => {});
@@ -250,6 +252,7 @@ export async function fireAutomation(
       name,
       reply: lastAssistantText,
       error: message,
+      sessionFile: wrapper.sessionFile,
       startedAt: runStartedAt,
       durationMs: Date.now() - runStartedAt,
     }).catch(() => {});

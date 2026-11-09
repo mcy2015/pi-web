@@ -25,22 +25,21 @@ import {
 /** Rich messages carry up to 32768 characters; keep a margin below that. */
 export const TELEGRAM_RICH_MESSAGE_LIMIT = 32_000;
 
-/** One chunk: rich when it holds a table, else Telegram HTML with a plain fallback. */
-async function sendMarkdownChunk(token: string, chatId: number, markdown: string): Promise<void> {
+/** One chunk: rich when it holds a table, else Telegram HTML with a plain
+ * fallback. Resolves with the sent message's id. */
+async function sendMarkdownChunk(token: string, chatId: number, markdown: string): Promise<number> {
   if (hasMarkdownTable(markdown)) {
     try {
-      await sendRichMessage(token, chatId, protectUnderscoresForRichMarkdown(markdown));
-      return;
+      return (await sendRichMessage(token, chatId, protectUnderscoresForRichMarkdown(markdown))).message_id;
     } catch (error) {
       if (!(error instanceof TelegramApiError)) throw error;
     }
   }
   try {
-    await sendMessage(token, chatId, markdownToTelegramHtml(markdown), { parseMode: "HTML" });
+    return (await sendMessage(token, chatId, markdownToTelegramHtml(markdown), { parseMode: "HTML" })).message_id;
   } catch (error) {
     if (error instanceof TelegramApiError && error.statusCode === 400) {
-      await sendMessage(token, chatId, markdown);
-      return;
+      return (await sendMessage(token, chatId, markdown)).message_id;
     }
     throw error;
   }
@@ -49,22 +48,26 @@ async function sendMarkdownChunk(token: string, chatId: number, markdown: string
 /**
  * Sends a Markdown reply to a chat. A table-carrying reply that fits one rich
  * message goes out whole (a real rendered table); everything else arrives as
- * Telegram-HTML chunks. Throws only when every layer for a chunk failed.
+ * Telegram-HTML chunks. Resolves with the ids of every message sent (the
+ * automations announce records them so a Telegram reply to the announce can
+ * be matched back to its briefing); empty text sends nothing. Throws only
+ * when every layer for a chunk failed.
  */
-export async function sendMarkdownText(token: string, chatId: number, text: string): Promise<void> {
+export async function sendMarkdownText(token: string, chatId: number, text: string): Promise<number[]> {
   const trimmed = text.trim();
-  if (trimmed === "") return;
+  if (trimmed === "") return [];
   if (hasMarkdownTable(trimmed) && trimmed.length <= TELEGRAM_RICH_MESSAGE_LIMIT) {
     try {
-      await sendRichMessage(token, chatId, protectUnderscoresForRichMarkdown(trimmed));
-      return;
+      return [(await sendRichMessage(token, chatId, protectUnderscoresForRichMarkdown(trimmed))).message_id];
     } catch (error) {
       if (!(error instanceof TelegramApiError)) throw error;
     }
   }
+  const messageIds: number[] = [];
   for (const chunk of splitForTelegram(trimmed)) {
-    await sendMarkdownChunk(token, chatId, chunk);
+    messageIds.push(await sendMarkdownChunk(token, chatId, chunk));
   }
+  return messageIds;
 }
 
 /**
