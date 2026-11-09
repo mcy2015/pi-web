@@ -2,7 +2,7 @@
 
 The Telegram channel's outgoing-message pipeline and its traps.
 
-Files: `lib/telegram/bot-api.ts`, `lib/telegram/message-text.ts`, `lib/telegram/rich-send.ts`, `lib/telegram/runtime.ts`, `lib/telegram/session-bridge.ts`, `lib/telegram/menus.ts`, `lib/telegram/command-model.ts`, `lib/telegram/command-reply.ts`, `lib/telegram/command-project.ts`, `lib/telegram/command-task.ts`, `lib/telegram/attachments.ts`, `lib/telegram/prefs.ts`, `lib/telegram/model-listing.ts`, `lib/automations/notify.ts`.
+Files: `lib/telegram/bot-api.ts`, `lib/telegram/message-text.ts`, `lib/telegram/rich-send.ts`, `lib/telegram/runtime.ts`, `lib/telegram/session-bridge.ts`, `lib/telegram/briefings.ts`, `lib/telegram/menus.ts`, `lib/telegram/command-model.ts`, `lib/telegram/command-reply.ts`, `lib/telegram/command-project.ts`, `lib/telegram/command-task.ts`, `lib/telegram/attachments.ts`, `lib/telegram/prefs.ts`, `lib/telegram/model-listing.ts`, `lib/automations/notify.ts`.
 
 ## Sending Markdown replies: three layers
 
@@ -21,6 +21,18 @@ The automations announce (`lib/automations/notify.ts`) additionally retries a fa
 - **Rich Markdown reads `_text_` as italic.** A bare `snake_case` token loses its underscores; `protectUnderscoresForRichMarkdown()` turns such words into code spans (path characters included, so `~/pi-cwd/2026_10_27` is covered) while code spans, fenced blocks, links and `_italic_`/`__bold__` markers keep theirs. Words glued to full-width punctuation are still caught (the pass works per word inside each whitespace token, not per token).
 - `splitForTelegram()` still chunks at 4096; only the rich layer may exceed it (a table-carrying reply up to 32 000 goes as one rich message).
 - `hasMarkdownTable()` must strip fenced blocks first: a table sample quoted in a code block is code, not a table.
+
+## Automation briefings as follow-up context
+
+The automations announce is a one-way bot message; the chat's pi session never sees it. Every delivered announce is therefore also recorded as a briefing in the channels state (`lib/telegram/briefings.ts`): the pushed text (header included, capped), the run's session file, and the ids of every announce message (a chunked delivery sends several). `dispatchTurn` prefixes the chat's next dispatched turn — text, voice, photo or document — with the briefings no dispatched turn has seen yet (`takeTurnContext`), and a Telegram reply to an announce message quotes that briefing whatever its age; `sendMarkdownText` returns the sent message ids for exactly that match. The prefix rides the prompt text (the equivalent of the user pasting the briefing), so it enters the session's history once and stays there for later turns.
+
+Traps:
+
+- **Consumption runs inside the state lock.** Both the recording (notify.ts's `recordBriefing`) and the take (runtime.ts's `consumeBriefingContext`) are `editTelegramState` callbacks over `current`. Computing on a pre-read snapshot and overwriting would race `persistOffset`'s write and could roll the poll offset back — the same batch of updates processed twice.
+- **deliveredAt is chat-scoped, not session-scoped.** /new and /task switch the chat's session; unseen briefings still land in the next turn of whatever session is bound. Slash commands never consume briefings — they return before dispatchTurn.
+- **Stamping happens at dispatch**, before the turn actually runs: a turn that fails before its prompt reaches pi (session start failure) has already marked its briefings delivered; that quoting is lost, not retried.
+- **Budgets: 8 briefings per chat, 48 across all chats, 4 000 chars stored per briefing, 8 000 quoted per turn.** The state file has a 1 MB read cap and an over-cap file is not set aside — it throws — so the global cap keeps the briefings' worst case around 200 KB. Over-budget older entries degrade to a pointer line naming the run's session file.
+- **Recording is best effort.** An announce sent but whose record write failed (locked store) is simply not quotable; the failure never fails the run or the remaining targets. The notify loop's `break` after a final send failure skips later targets too — pre-existing behavior, unchanged.
 
 ## Inline menus (/model, /think, /reply, /project)
 
