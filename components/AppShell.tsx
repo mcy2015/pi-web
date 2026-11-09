@@ -1068,8 +1068,13 @@ export function AppShell() {
   }, [activeCwd, changeFileWorkspace, invalidateWorkspaceRestore, isMobile, newSessionCwd, router, selectedSession]);
 
   // Global keyboard shortcuts (handles Esc, Ctrl+Alt+N etc.)
+  // The top bar's New button takes the same path, so both start a fresh
+  // composer in the active cwd.
+  const startNewSessionInCwd = useCallback((cwd: string) => {
+    handleNewSession(`kb-${Date.now()}`, cwd);
+  }, [handleNewSession]);
   useGlobalKeyboardShortcuts({
-    onNewSession: (cwd: string) => handleNewSession(`kb-${Date.now()}`, cwd),
+    onNewSession: startNewSessionInCwd,
     activeCwd,
   });
 
@@ -2584,6 +2589,26 @@ export function AppShell() {
                 <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
               </svg>
             )}
+          </button>
+          {/* New session, always reachable without the sidebar (as Ctrl+Alt+N is) */}
+          <button
+            type="button"
+            onClick={() => { if (activeCwd) startNewSessionInCwd(activeCwd); }}
+            disabled={!activeCwd}
+            title={activeCwd ? translate("sidebar.newSessionTitle", { path: activeCwd }) : translate("sidebar.new")}
+            aria-label={activeCwd ? translate("sidebar.newSessionTitle", { path: activeCwd }) : translate("sidebar.new")}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
+              background: "none", border: "none", borderRight: "1px solid var(--border)",
+              color: "var(--text-muted)", cursor: "pointer", flexShrink: 0, transition: "color 0.12s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="12" y1="8" x2="12" y2="16" /><line x1="8" y1="12" x2="16" y2="12" />
+            </svg>
           </button>
           {isMobile && (
             <div
