@@ -38,8 +38,16 @@ async function findRepositoryRoot(cwd: string): Promise<string | null> {
 }
 
 function isWithinPath(parent: string, target: string): boolean {
-  const relative = path.relative(path.resolve(parent), path.resolve(target));
+  return isRelativeWithin(path.relative(path.resolve(parent), path.resolve(target)));
+}
+
+/** Whether a `path.relative()` answer stays inside the folder it was taken from. */
+function isRelativeWithin(relative: string): boolean {
   return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+}
+
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 function toGitPath(filePath: string): string {
@@ -94,20 +102,65 @@ async function readTrackedFileLineStats(
   }
 }
 
-function countUntrackedTextLines(filePath: string): number {
+const STATUS_ENTRIES_PER_TURN = 1000;
+// libuv's default thread pool: more reads only queue in front of the server's other fs work.
+const UNTRACKED_READ_CONCURRENCY = 4;
+const UNTRACKED_READ_CHUNK_BYTES = 64 * 1024;
+const NEWLINE = 0x0a;
+
+/**
+ * An untracked text file's lines as a new-file diff counts them: one per "\n", plus
+ * one for a last line without it. Empty, binary (a NUL byte), larger than the text
+ * preview, and anything but a regular file count 0. Read in chunks into `buffer`,
+ * up to the size lstat reported, as readFileSync read up to the size it found.
+ */
+async function countUntrackedTextLines(filePath: string, buffer: Buffer): Promise<number> {
   try {
-    const stat = fs.lstatSync(filePath);
-    if (!stat.isFile() || stat.size > TEXT_PREVIEW_MAX_BYTES) return 0;
-    const content = fs.readFileSync(filePath);
-    if (hasNullByte(content) || content.length === 0) return 0;
-    const text = content.toString("utf8");
-    return text.endsWith("\n") ? text.split("\n").length - 1 : text.split("\n").length;
+    const stat = await fs.promises.lstat(filePath);
+    if (!stat.isFile() || stat.size > TEXT_PREVIEW_MAX_BYTES || stat.size === 0) return 0;
+    const handle = await fs.promises.open(filePath, "r");
+    try {
+      let total = 0;
+      let newlines = 0;
+      let lastByte = -1;
+      while (total < stat.size) {
+        const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, stat.size - total), null);
+        if (bytesRead === 0) break;
+        const chunk = buffer.subarray(0, bytesRead);
+        if (hasNullByte(chunk)) return 0;
+        for (let index = chunk.indexOf(NEWLINE); index !== -1; index = chunk.indexOf(NEWLINE, index + 1)) newlines++;
+        lastByte = chunk[bytesRead - 1];
+        total += bytesRead;
+      }
+      if (total === 0) return 0;
+      return lastByte === NEWLINE ? newlines : newlines + 1;
+    } finally {
+      await handle.close();
+    }
   } catch {
     return 0;
   }
 }
 
-export async function getGitStatus(cwd: string): Promise<GitStatusResponse> {
+// Async and a few files at a time: tens of thousands of untracked files read
+// synchronously held the server's event loop, every stream and request, for
+// seconds (#1584). Same counts, no cache. Stops when the request is gone.
+async function countUntrackedLines(filePaths: readonly string[], signal?: AbortSignal): Promise<Map<string, number>> {
+  let next = 0;
+  const lines = new Map<string, number>();
+  const worker = async () => {
+    const buffer = Buffer.allocUnsafe(UNTRACKED_READ_CHUNK_BYTES);
+    while (next < filePaths.length && !signal?.aborted) {
+      const filePath = filePaths[next++];
+      lines.set(filePath, await countUntrackedTextLines(filePath, buffer));
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(UNTRACKED_READ_CONCURRENCY, filePaths.length) }, worker));
+  return lines;
+}
+
+/** `signal`: the request's; once it aborts the scan stops and this throws. */
+export async function getGitStatus(cwd: string, signal?: AbortSignal): Promise<GitStatusResponse> {
   const repositoryRoot = await findRepositoryRoot(cwd);
   if (!repositoryRoot) {
     return {
@@ -128,37 +181,46 @@ export async function getGitStatus(cwd: string): Promise<GitStatusResponse> {
     readStatusEntries(repositoryRoot),
     readTrackedFileLineStats(realRoot, realCwd),
   ]);
-  let untrackedAdditions = 0;
-  const files = entries.flatMap((entry): GitFileStatus[] => {
+  const files: GitFileStatus[] = [];
+  for (let index = 0; index < entries.length; index++) {
+    // Tens of thousands of paths take long enough to stall the server on their own.
+    if (index > 0 && index % STATUS_ENTRIES_PER_TURN === 0) {
+      await yieldToEventLoop();
+      signal?.throwIfAborted();
+    }
+    const entry = entries[index];
     const realFilePath = path.resolve(realRoot, entry.path);
-    if (!isWithinPath(realCwd, realFilePath)) return [];
-    const filePath = path.join(cwd, path.relative(realCwd, realFilePath));
-    const classified = classifyGitStatus(entry);
+    const relative = path.relative(realCwd, realFilePath);
+    if (!isRelativeWithin(relative)) continue;
+    const filePath = path.join(cwd, relative);
     const originalPath = entry.originalPath
       ? path.resolve(repositoryRoot, entry.originalPath)
       : undefined;
-    if (classified.status === "untracked") {
-      const additions = countUntrackedTextLines(filePath);
-      untrackedAdditions += additions;
-      return [{
-        filePath,
-        ...classified,
-        indexStatus: entry.indexStatus,
-        worktreeStatus: entry.worktreeStatus,
-        additions,
-        ...(originalPath && originalPath !== filePath ? { originalPath } : {}),
-      }];
-    }
+    // Per-file counts come from git's own numstat; renames say nothing about
+    // which side a row belongs to, so they carry none.
     const stats = trackedStats.byPath.get(realFilePath);
-    return [{
+    files.push({
       filePath,
-      ...classified,
+      ...classifyGitStatus(entry),
       indexStatus: entry.indexStatus,
       worktreeStatus: entry.worktreeStatus,
       ...(stats ? { additions: stats.additions, deletions: stats.deletions } : {}),
       ...(originalPath && originalPath !== filePath ? { originalPath } : {}),
-    }];
-  });
+    });
+  }
+  const untrackedLines = await countUntrackedLines(
+    files.flatMap((file) => (file.status === "untracked" ? [file.filePath] : [])),
+    signal,
+  );
+  signal?.throwIfAborted();
+  // An untracked row carries its own line count, the way a new-file diff does.
+  let untrackedAdditions = 0;
+  for (const file of files) {
+    if (file.status !== "untracked") continue;
+    const additions = untrackedLines.get(file.filePath) ?? 0;
+    file.additions = additions;
+    untrackedAdditions += additions;
+  }
 
   return {
     isGitRepository: true,
