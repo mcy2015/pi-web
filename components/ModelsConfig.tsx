@@ -346,11 +346,15 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 // ── Provider detail ───────────────────────────────────────────────────────────
 
-function ProviderDetail({ name, editingName, fallbackLabel, provider, onChange, onEditingNameChange, onRename, onDelete, onAddModels, enabledModels }: {
+function ProviderDetail({ name, editingName, fallbackLabel, provider, onChange, onEditingNameChange, onRename, onDelete, onAddModels, enabledModels, managedCredential = false }: {
   name: string; editingName: string; fallbackLabel: string; provider: ProviderEntry;
   onChange: (p: ProviderEntry) => void; onEditingNameChange: (n: string) => void;
   onRename: (n: string) => void; onDelete: () => void;
   onAddModels: (models: DiscoveredModel[]) => void; enabledModels: EnabledModelsController;
+  /** True when the provider's credential lives in auth.json (merged API-key
+   *  panel): the inline apiKey field and the id rename are hidden — the id is
+   * the auth.json entry's key, renaming would orphan the stored credential. */
+  managedCredential?: boolean;
 }) {
   const { t } = useI18n();
   const [discoveryState, setDiscoveryState] = useState<ModelDiscoveryState>({ phase: "idle" });
@@ -486,15 +490,21 @@ function ProviderDetail({ name, editingName, fallbackLabel, provider, onChange, 
         <EnabledModelsProviderSwitchNote providerId={name} controller={enabledModels} id={switchNoteId} />
       </div>
 
-       <Field label={t("i18n.providerId")}>
-        <TextInput value={editingName} onChange={onEditingNameChange} placeholder="provider-id" mono />
-        {editingName !== name && editingName.trim() && (
-          <button onClick={() => onRename(editingName.trim())}
-            style={{ marginTop: 4, padding: "3px 10px", background: "var(--accent)", border: "none", borderRadius: 4, color: "var(--accent-contrast)", cursor: "pointer", fontSize: 11, alignSelf: "flex-start" }}>
-             {t("i18n.rename")}
-          </button>
-        )}
-      </Field>
+      {managedCredential ? (
+        <p style={{ margin: 0, fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5 }}>
+          {name} · {t("models.definitionInModelsJson")}
+        </p>
+      ) : (
+        <Field label={t("i18n.providerId")}>
+          <TextInput value={editingName} onChange={onEditingNameChange} placeholder="provider-id" mono />
+          {editingName !== name && editingName.trim() && (
+            <button onClick={() => onRename(editingName.trim())}
+              style={{ marginTop: 4, padding: "3px 10px", background: "var(--accent)", border: "none", borderRadius: 4, color: "var(--accent-contrast)", cursor: "pointer", fontSize: 11, alignSelf: "flex-start" }}>
+               {t("i18n.rename")}
+            </button>
+          )}
+        </Field>
+      )}
 
       {/* models.json `name`: the label the sidebar and the selector show (#1567). */}
       <Field label={t("models.providerDisplayName")}>
@@ -507,10 +517,14 @@ function ProviderDetail({ name, editingName, fallbackLabel, provider, onChange, 
           placeholder="https://api.example.com/v1" mono />
       </Field>
 
-      <Field label="API Key">
-        <SecretTextInput value={provider.apiKey ?? ""} onChange={(v) => set("apiKey", v || undefined)}
-          placeholder={t("models.apiKeyPlaceholder")} mono />
-      </Field>
+      {/* In the merged API-key panel the credential is managed by auth.json;
+       * an inline apiKey here would only be a confusing second key slot. */}
+      {!managedCredential && (
+        <Field label="API Key">
+          <SecretTextInput value={provider.apiKey ?? ""} onChange={(v) => set("apiKey", v || undefined)}
+            placeholder={t("models.apiKeyPlaceholder")} mono />
+        </Field>
+      )}
 
       <Field label="API">
         <Select value={provider.api ?? ""} onChange={(v) => set("api", v || undefined)} options={API_OPTIONS} />
@@ -1729,9 +1743,19 @@ function OAuthDetail({ provider, onRefresh, enabledModels, contextSettings }: {
 // pi's default router address (`/login llama.cpp`, docs/llama-cpp.md).
 const DEFAULT_LLAMA_ROUTER_URL = "http://127.0.0.1:8080";
 
-function ApiKeyDetail({ provider, onRefresh, enabledModels, contextSettings }: {
+function ApiKeyDetail({ provider, onRefresh, enabledModels, contextSettings, definition }: {
   provider: ApiKeyProvider; onRefresh: () => void; enabledModels: EnabledModelsController;
   contextSettings: ModelContextSettings;
+  /** The models.json entry of the same id, when present: its editor renders
+   *  here so a self-hosted provider configured through this panel (base URL,
+   *  API protocol, compat) is a single entry instead of two. */
+  definition?: {
+    entry: ProviderEntry;
+    fallbackLabel: string;
+    update: (p: ProviderEntry) => void;
+    remove: () => void;
+    addModels: (models: DiscoveredModel[]) => void;
+  };
 }) {
   const llama = provider.id === LLAMA_CPP_PROVIDER_ID;
   const [serverUrl, setServerUrl] = useState(llama && !provider.configured ? DEFAULT_LLAMA_ROUTER_URL : "");
@@ -1875,6 +1899,25 @@ function ApiKeyDetail({ provider, onRefresh, enabledModels, contextSettings }: {
           contextSettings={contextSettings}
           emptyCatalogHint={llama ? t("models.llamaEmptyCatalog") : undefined}
         />
+      )}
+
+      {definition && (
+        <>
+          <div style={{ borderTop: "1px solid var(--border)" }} />
+          <ProviderDetail
+            name={provider.id}
+            editingName={provider.id}
+            fallbackLabel={definition.fallbackLabel}
+            provider={definition.entry}
+            onChange={definition.update}
+            onEditingNameChange={() => {}}
+            onRename={() => {}}
+            onDelete={definition.remove}
+            onAddModels={definition.addModels}
+            enabledModels={enabledModels}
+            managedCredential
+          />
+        </>
       )}
     </div>
   );
@@ -2380,6 +2423,10 @@ export function ModelsConfig({ onClose, embedded = false, cwd = null }: {
   }, [applyProviderRename, config, enabledModels, loadError, providerNameDraft, refreshAuthProviders, t]);
 
   const providers = Object.entries(config.providers ?? {}).filter(([id, entry]) => {
+    // A definition whose credential is an active API-key provider renders inside
+    // that provider's panel (one entry, not two); without the credential it
+    // falls back to a plain custom entry.
+    if (apiKeyProviders.some((provider) => provider.id === id && provider.configured)) return false;
     if (!isOverridesOnly(entry) || savedNames.has(id)) return true;
     const managed = oauthProviders.some((provider) => provider.id === id) || apiKeyProviders.some((provider) => provider.id === id);
     return authListed && !managed;
@@ -2400,6 +2447,20 @@ export function ModelsConfig({ onClose, embedded = false, cwd = null }: {
   const activeOAuth = oauthProviders.filter((p) => p.loggedIn);
   const activeApiKey = apiKeyProviders.filter((p) => p.configured);
 
+  // An API-key provider with a same-id models.json definition renders that
+  // definition's editor inside its panel (managedCredential mode).
+  const renderApiKeyDetail = (p: ApiKeyProvider) => {
+    const entry = config.providers?.[p.id];
+    return <ApiKeyDetail key={p.id} provider={p} onRefresh={refreshAuthProviders} enabledModels={enabledModels} contextSettings={contextSettings(p.id)}
+      definition={entry ? {
+        entry,
+        fallbackLabel: customProviderLabel(p.id, {}),
+        update: (next) => updateProvider(p.id, next),
+        remove: () => deleteProvider(p.id),
+        addModels: (models) => addDiscoveredModels(p.id, models),
+      } : undefined} />;
+  };
+
   // Resolve current detail
   const detailContent = (() => {
     if (!selection) return null;
@@ -2411,9 +2472,12 @@ export function ModelsConfig({ onClose, embedded = false, cwd = null }: {
     if (selection.type === "apikey") {
       const p = apiKeyProviders.find((p) => p.id === selection.providerId);
       if (!p) return null;
-      return <ApiKeyDetail key={p.id} provider={p} onRefresh={refreshAuthProviders} enabledModels={enabledModels} contextSettings={contextSettings(p.id)} />;
+      return renderApiKeyDetail(p);
     }
     if (selection.type === "provider") {
+      // A definition merged into its API-key panel: redirect there.
+      const merged = apiKeyProviders.find((p) => p.id === selection.name && p.configured);
+      if (merged) return renderApiKeyDetail(merged);
       const provider = config.providers?.[selection.name];
       // Only an entry the list shows as custom: an overrides-only one waits for the provider lists.
       if (!provider || !providers.some(([id]) => id === selection.name)) return null;

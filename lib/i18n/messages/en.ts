@@ -1746,6 +1746,7 @@ export const enLocale: LocalePlugin = {
     "i18n.zoomOut": "Zoom out",
     "i18n.zoomIn": "Zoom in",
     "i18n.fitToWidth": "Fit to width",
+    "models.definitionInModelsJson": "Definition saved in models.json; the API key is managed above",
     "models.discoveryFetching": "Importing models…",
     "models.discoveryFetch": "Import models…",
     "models.discoveryFilterPlaceholder": "Filter {count} models…",
