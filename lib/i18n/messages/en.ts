@@ -1951,6 +1951,8 @@ export const enLocale: LocalePlugin = {
     "i18n.expand": "Expand",
     "i18n.hideDetails": "Hide details",
     "i18n.showDetails": "Show details",
+    "btw.question": "Question",
+    "btw.answer": "Answer",
     "i18n.thinkingUnavailable": "Thinking content unavailable",
     "i18n.before": "Before",
     "i18n.after": "After",

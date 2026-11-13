@@ -4,9 +4,10 @@
 // is best effort: a missing token or an unreachable chat logs a warning and
 // never fails the run it belongs to.
 
-import { readTelegramConfig } from "../telegram/config-store";
+import { editTelegramState, readTelegramConfig } from "../telegram/config-store";
 import { sendMarkdownText } from "../telegram/rich-send";
 import { TelegramApiError } from "../telegram/bot-api";
+import { appendBriefing, capBriefingText, type TelegramBriefing } from "../telegram/briefings";
 import type { AutomationModel, RunStatus } from "./store";
 
 export interface AutomationOutcome {
@@ -18,6 +19,8 @@ export interface AutomationOutcome {
   reply: string;
   /** Why a run failed or was skipped, shown to the channel. */
   error: string | null;
+  /** The run's session file, so chat follow-ups can read the full run. */
+  sessionFile: string | null;
   startedAt: number;
   durationMs: number;
 }
@@ -60,6 +63,43 @@ export function notifyRetryDelayMs(attempt: number, error: unknown): number | nu
   return NOTIFY_RETRY_DELAYS_MS[attempt];
 }
 
+/** The briefing record for one delivered announce (pushedText = header + reply, exactly what the chat saw). */
+export function briefingFromOutcome(
+  automation: AutomationModel,
+  outcome: AutomationOutcome,
+  pushedText: string,
+  messageIds: number[],
+  at = Date.now(),
+): TelegramBriefing {
+  return {
+    at,
+    automationId: automation.id,
+    name: outcome.name,
+    // A terminal status only; a run somehow still "running" reads as stopped.
+    status: outcome.status === "running" ? "skipped" : outcome.status,
+    replyText: capBriefingText(pushedText),
+    sessionFile: outcome.sessionFile,
+    messageIds,
+    deliveredAt: null,
+  };
+}
+
+/** Records a delivered announce for the chat; a locked store only warns — the
+ * announce itself was already sent, so a lost record must never fail the run
+ * or the remaining targets. */
+async function recordBriefing(
+  chatId: number,
+  automation: AutomationModel,
+  outcome: AutomationOutcome,
+  pushedText: string,
+  messageIds: number[],
+): Promise<void> {
+  await editTelegramState((current) => ({
+    state: appendBriefing(current, chatId, briefingFromOutcome(automation, outcome, pushedText, messageIds)),
+    changed: true,
+  }));
+}
+
 /** Delivers the outcome to every notify channel; never throws. */
 export async function pushRunOutcome(automation: AutomationModel, outcome: AutomationOutcome): Promise<void> {
   const targets = automation.notifyChannels;
@@ -75,11 +115,12 @@ export async function pushRunOutcome(automation: AutomationModel, outcome: Autom
   for (const target of targets) {
     if (target.type !== "telegram") continue;
     const attempts = NOTIFY_RETRY_DELAYS_MS.length + 1;
+    let sentMessageIds: number[] | null = null;
     try {
       for (let attempt = 0; ; attempt++) {
         try {
           // Rich when the reply holds a table (Telegram renders it), else chunks.
-          await sendMarkdownText(config.token, target.chatId, text);
+          sentMessageIds = await sendMarkdownText(config.token, target.chatId, text);
           break;
         } catch (error) {
           const delay = notifyRetryDelayMs(attempt, error);
@@ -93,6 +134,11 @@ export async function pushRunOutcome(automation: AutomationModel, outcome: Autom
     } catch (error) {
       console.warn(`[pi-web] automation "${automation.name}": notifying telegram chat ${target.chatId} failed: ${error instanceof Error ? error.message : String(error)}`);
       break;
+    }
+    if (sentMessageIds !== null) {
+      await recordBriefing(target.chatId, automation, outcome, text, sentMessageIds).catch((error) => {
+        console.warn(`[pi-web] automation "${automation.name}": recording the briefing for telegram chat ${target.chatId} failed: ${error instanceof Error ? error.message : String(error)}`);
+      });
     }
   }
 }

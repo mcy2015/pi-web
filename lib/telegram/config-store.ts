@@ -16,6 +16,7 @@ import { serializeByKey } from "../key-serializer";
 import { readRegularFileText } from "../regular-file";
 import type { TelegramAllowedChat } from "./types";
 import type { ReplyMode } from "./prefs";
+import { parseBriefings, type TelegramBriefing } from "./briefings";
 
 const MAX_BYTES = 1024 * 1024;
 
@@ -63,6 +64,8 @@ export interface TelegramRuntimeState {
   lastUnknownChat: { id: number; title: string | null; at: number } | null;
   /** Chat id (as string) → its reply granularity; absent entry = "stream". */
   replyModes?: Record<string, ReplyMode>;
+  /** Chat id (as string) → automation briefings delivered there, oldest first. */
+  briefings?: Record<string, TelegramBriefing[]>;
 }
 
 export const EMPTY_CONFIG: TelegramConfig = { token: "", enabled: false, defaultCwd: null, allowedChats: [] };
@@ -242,12 +245,14 @@ export function parseTelegramState(raw: unknown): TelegramRuntimeState {
       }
     }
   }
+  const briefings = parseBriefings(record.briefings);
   return {
     offset,
     chats,
     lastUnknownChat,
     // An empty field stays absent, keeping EMPTY_STATE-shaped states clean.
     ...(Object.keys(replyModes).length > 0 ? { replyModes } : {}),
+    ...(Object.keys(briefings).length > 0 ? { briefings } : {}),
   };
 }
 

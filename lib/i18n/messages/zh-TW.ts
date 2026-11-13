@@ -1951,6 +1951,8 @@ export const zhTWLocale: LocalePlugin = {
     "i18n.expand": "展開",
     "i18n.hideDetails": "隱藏詳細資料",
     "i18n.showDetails": "顯示詳細資料",
+    "btw.question": "問題",
+    "btw.answer": "回答",
     "i18n.thinkingUnavailable": "思考內容不可用",
     "i18n.before": "變更前",
     "i18n.after": "變更後",

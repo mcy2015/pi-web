@@ -38,6 +38,7 @@ import { readChatReplyMode, type ReplyMode } from "./prefs";
 import { MENU_CANCEL_INDEX, parseMenuCallback, TelegramMenuRegistry } from "./menus";
 import { markdownToTelegramHtml, TELEGRAM_MESSAGE_LIMIT } from "./message-text";
 import { sendMarkdownText, finalizePreviewRich } from "./rich-send";
+import { takeTurnContext } from "./briefings";
 import type { TelegramStatus } from "./types";
 import { getRpcSession } from "@/lib/rpc-manager";
 
@@ -225,6 +226,7 @@ const HELP_TEXT = [
   "/reply — streaming, final-only, or with a tool digest",
   "/project — switch this chat's working folder",
   "/task — switch to an earlier session in this folder",
+  "Reply to an automation briefing to ask about it — it is quoted for the agent, and unquoted briefings reach the next message on their own.",
   "Photos run with vision; small text files are read into the prompt. A message sent while a turn runs is queued as its follow-up.",
   "In groups I only answer messages that mention me or reply to me.",
 ].join("\n");
@@ -443,11 +445,42 @@ async function handleMenuCallback(token: string, callbackQuery: NonNullable<Tele
 
 // ---- Turn dispatch: preview lifecycle + media + approvals. ----
 
-function dispatchTurn(token: string, chatId: number, input: TurnInput, replyMode: ReplyMode = readChatReplyMode(chatId)): void {
+/** Automation briefings as turn context: the ones this chat has not yet seen,
+ * plus the announce being replied to. Consumed inside the state lock (the
+ * same read-modify-write every state edit goes through) so a concurrent
+ * offset or binding write can neither duplicate nor lose a briefing; a locked
+ * store only warns and the turn runs without the context. */
+async function consumeBriefingContext(chatId: number, replyToMessageId: number | undefined): Promise<string> {
+  let context = "";
+  try {
+    await editTelegramState((current) => {
+      const taken = takeTurnContext(current, chatId, replyToMessageId, Date.now());
+      context = taken.context;
+      if (taken.state === current) return { state: current, changed: false };
+      return { state: taken.state, changed: true };
+    });
+  } catch (error) {
+    console.warn(`[pi-web] telegram chat ${chatId}: taking the briefing context failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return context;
+}
+
+function dispatchTurn(
+  token: string,
+  chatId: number,
+  input: TurnInput,
+  replyMode: ReplyMode = readChatReplyMode(chatId),
+  replyToMessageId?: number,
+): void {
   // Not awaited: pi queues a prompt sent mid-run as a follow-up turn, so the
   // polling loop stays free for /stop and other chats.
   const turn = (async () => {
     const config = readTelegramConfig();
+    // The briefing context is prefixed to the prompt text — the equivalent of
+    // the user pasting the briefing — so it enters the session's history once
+    // and every later turn keeps it.
+    const briefingContext = await consumeBriefingContext(chatId, replyToMessageId);
+    const turnInput = briefingContext === "" ? input : { ...input, text: `${briefingContext}\n\n${input.text}` };
     // Tools mode counts the turn's top-level calls (nested codemode calls
     // are folded into their parent's own result) for the digest line.
     const toolCounts = replyMode === "tools" ? new Map<string, number>() : null;
@@ -455,12 +488,12 @@ function dispatchTurn(token: string, chatId: number, input: TurnInput, replyMode
       chatId,
       toolCounts !== null
         ? {
-            ...input,
+            ...turnInput,
             onToolCall: (toolName, nested) => {
               if (!nested) toolCounts.set(toolName, (toolCounts.get(toolName) ?? 0) + 1);
             },
           }
-        : input,
+        : turnInput,
       config,
       () => sendChatAction(token, chatId),
     );
@@ -544,7 +577,7 @@ async function dispatchPhoto(token: string, chatId: number, message: TelegramMes
     data: bytes.toString("base64"),
     mimeType: mimeType && mimeType.startsWith("image/") ? mimeType : "image/jpeg",
   }];
-  dispatchTurn(token, chatId, { text: message.caption?.trim() || "Look at this image.", images });
+  dispatchTurn(token, chatId, { text: message.caption?.trim() || "Look at this image.", images }, undefined, message.reply_to_message?.message_id);
 }
 
 /** Documents: images run with vision, small text files are inlined into the prompt, the rest are refused without a download. */
@@ -574,12 +607,12 @@ async function dispatchDocument(token: string, chatId: number, message: Telegram
       data: bytes.toString("base64"),
       mimeType: mimeType && mimeType.startsWith("image/") ? mimeType : "image/jpeg",
     }];
-    dispatchTurn(token, chatId, { text: message.caption?.trim() || "Look at this file.", images }, mode);
+    dispatchTurn(token, chatId, { text: message.caption?.trim() || "Look at this file.", images }, mode, message.reply_to_message?.message_id);
     return;
   }
   // A lossy UTF-8 read is acceptable: binary files never get this far.
   const { prompt } = buildDocumentPrompt(doc.file_name ?? "file.txt", bytes.toString("utf8"), message.caption?.trim() ?? "");
-  dispatchTurn(token, chatId, { text: prompt }, mode);
+  dispatchTurn(token, chatId, { text: prompt }, mode, message.reply_to_message?.message_id);
 }
 
 /** Voice: transcribed through a local OpenAI-compatible endpoint when one runs. */
@@ -606,7 +639,7 @@ async function dispatchVoice(token: string, chatId: number, message: TelegramMes
     const payload = await response.json() as { text?: string };
     const text = payload.text?.trim();
     if (!text) throw new Error("empty transcript");
-    dispatchTurn(token, chatId, { text: `${text}\n(a voice message, transcribed)` });
+    dispatchTurn(token, chatId, { text: `${text}\n(a voice message, transcribed)` }, undefined, message.reply_to_message?.message_id);
   } catch (error) {
     await reply(token, chatId, `🎤 Voice transcription is unavailable (${error instanceof Error ? error.message : String(error)}). Please type, or send a photo.`);
   }
@@ -773,5 +806,6 @@ async function handleUpdate(token: string, update: TelegramUpdate): Promise<void
       },
     },
     replyMode,
+    message.reply_to_message?.message_id,
   );
 }
