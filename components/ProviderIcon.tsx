@@ -43,6 +43,10 @@ const PROVIDER_ICONS: Record<string, { symbol: string; color: boolean }> = {
   perplexity: { symbol: "perplexity", color: true },
   together: { symbol: "together", color: true },
   grok: { symbol: "grok", color: false },
+  // Custom providers in models.json keep the key's case ("Strata" in the
+  // wild); lowercase covers a future lowercase id.
+  Strata: { symbol: "strata", color: false },
+  strata: { symbol: "strata", color: false },
 };
 
 export function ProviderIcon({ id, size }: { id: string; size: number }) {
