@@ -204,6 +204,10 @@ function isOverridesOnly(entry: ProviderEntry): boolean {
 
 const API_OPTIONS = ["openai-completions", "openai-responses", "anthropic-messages", "google-generative-ai"] as const;
 
+// compat.thinkingFormat values pi's openai-completions adapter branches on.
+// Blank leaves the key unset (pi's default request handling).
+const THINKING_FORMAT_OPTIONS = ["chat-template", "qwen-chat-template", "deepseek", "openai"] as const;
+
 const PROVIDER_ENTRY_MESSAGES: Record<ProviderEntryProblem, string> = {
   empty: "models.providerIncomplete",
   baseUrl: "models.providerNeedsBaseUrl",
@@ -364,6 +368,43 @@ function ProviderDetail({ name, editingName, fallbackLabel, provider, onChange, 
     setSelectedModelIds([]);
   }, [name, provider.baseUrl, provider.api, provider.apiKey]);
 
+  // compat.chatTemplateKwargs is edited as text: the draft holds what the user
+  // typed and each JSON-object draft is written through as it becomes valid,
+  // so an invalid one is simply not persisted (null = synced with the entry).
+  const [kwargsDraft, setKwargsDraft] = useState<string | null>(null);
+  useEffect(() => { setKwargsDraft(null); }, [name]);
+  const thinkingFormat = typeof provider.compat?.thinkingFormat === "string" ? provider.compat.thinkingFormat : "";
+  const kwargsSource = provider.compat?.chatTemplateKwargs;
+  const kwargsText = kwargsDraft
+    ?? (kwargsSource !== undefined && kwargsSource !== null && typeof kwargsSource === "object" && !Array.isArray(kwargsSource)
+      ? JSON.stringify(kwargsSource, null, 2)
+      : "");
+  let kwargsInvalid = false;
+  if (kwargsDraft !== null && kwargsDraft.trim()) {
+    try {
+      const parsed: unknown = JSON.parse(kwargsDraft);
+      kwargsInvalid = parsed === null || typeof parsed !== "object" || Array.isArray(parsed);
+    } catch { kwargsInvalid = true; }
+  }
+  const setThinkingFormat = (v: string) => {
+    let next = setProviderCompatKey(provider, "thinkingFormat", v || undefined);
+    if (v !== "chat-template") next = setProviderCompatKey(next, "chatTemplateKwargs", undefined);
+    onChange(next);
+  };
+  const setKwargsText = (text: string) => {
+    setKwargsDraft(text);
+    if (!text.trim()) {
+      onChange(setProviderCompatKey(provider, "chatTemplateKwargs", undefined));
+      return;
+    }
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+        onChange(setProviderCompatKey(provider, "chatTemplateKwargs", parsed));
+      }
+    } catch { /* keep the draft; an invalid edit is simply not persisted */ }
+  };
+
   const handleDiscoverModels = useCallback(async () => {
     if (discoveryState.phase === "loading") return;
     const requestId = ++discoveryRequestIdRef.current;
@@ -481,6 +522,36 @@ function ProviderDetail({ name, editingName, fallbackLabel, provider, onChange, 
           onChange={(headers) => set("headers", headers)}
         />
       </Field>
+
+      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+        <SectionTitle>{t("models.compatibility")}</SectionTitle>
+        <Field label={t("models.thinkingFormat")}>
+          <Select value={thinkingFormat} onChange={setThinkingFormat} options={THINKING_FORMAT_OPTIONS} />
+          <code style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>compat.thinkingFormat</code>
+        </Field>
+        {thinkingFormat === "chat-template" && (
+          <Field label={t("models.chatTemplateKwargs")}>
+            <textarea
+              value={kwargsText}
+              onChange={(event) => setKwargsText(event.target.value)}
+              placeholder={'{"enable_thinking": {"$var": "thinking.enabled"}}'}
+              rows={4}
+              spellCheck={false}
+              autoCapitalize="off"
+              autoCorrect="off"
+              aria-invalid={kwargsInvalid || undefined}
+              style={{ ...inputStyle, fontFamily: "var(--font-mono)", resize: "vertical", minHeight: 60, borderColor: kwargsInvalid ? "#ef4444" : undefined }}
+            />
+            {kwargsInvalid && (
+              <span style={{ fontSize: 10, color: "#ef4444", marginTop: 2 }}>{t("models.chatTemplateKwargsInvalid")}</span>
+            )}
+            <span style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>
+              {t("models.chatTemplateKwargsHelp")}
+            </span>
+            <code style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>compat.chatTemplateKwargs</code>
+          </Field>
+        )}
+      </div>
 
       <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
         {discoveryState.phase !== "success" && (
@@ -746,6 +817,18 @@ function setDeepseekCompat(model: ModelEntry, enabled: boolean): ModelEntry {
   delete rest.thinkingFormat;
   delete rest.requiresReasoningContentOnAssistantMessages;
   return { ...model, compat: Object.keys(rest).length ? rest : undefined };
+}
+
+// Sets or removes one key of a provider-level compat block, dropping the
+// block when it empties (mirrors setDeepseekCompat's cleanup).
+function setProviderCompatKey(provider: ProviderEntry, key: string, value: unknown): ProviderEntry {
+  if (value === undefined) {
+    if (!provider.compat?.[key]) return provider;
+    const rest = { ...provider.compat };
+    delete rest[key];
+    return { ...provider, compat: Object.keys(rest).length ? rest : undefined };
+  }
+  return { ...provider, compat: { ...(provider.compat ?? {}), [key]: value } };
 }
 
 // Compat can be configured at the provider or model level; provider-composer
