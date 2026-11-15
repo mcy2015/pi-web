@@ -4,7 +4,7 @@ import webpush from "web-push";
 import packageJson from "../package.json";
 import { writePrivateFileAtomicSync } from "./atomic-file";
 import { enLocale } from "./i18n/messages/en";
-import { zhCNLocale } from "./i18n/messages/zh-CN";
+import { getLocalePlugin } from "./i18n/registry";
 import { getAgentDir } from "./session-reader";
 
 export interface PushSubscriptionRecord {
@@ -103,10 +103,8 @@ function pushStatusCode(error: unknown): number | undefined {
  * subscribes; unknown locales fall back to English.
  */
 export function localeText(locale: string, key: "sessionComplete" | "taskFinished"): string {
-  if (locale === "zh-CN") {
-    const message = zhCNLocale.messages[key === "sessionComplete" ? "i18n.sessionComplete" : "i18n.taskFinished"];
-    if (message) return message;
-  }
+  const localized = getLocalePlugin(locale)?.messages[key === "sessionComplete" ? "i18n.sessionComplete" : "i18n.taskFinished"];
+  if (localized) return localized;
   const message = enLocale.messages[key === "sessionComplete" ? "i18n.sessionComplete" : "i18n.taskFinished"];
   return message ?? (key === "sessionComplete" ? "Session complete" : "Task finished.");
 }
