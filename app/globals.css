@@ -1131,6 +1131,10 @@ button.extension-widget-trigger:focus-visible {
     animation: none;
     opacity: 0.12;
   }
+
+  .markdown-body.is-streaming > * {
+    animation: none;
+  }
 }
 
 .extension-widget-content {
@@ -1258,6 +1262,17 @@ pre, code {
 /* Inline code inside a heading or emphasis keeps that surrounding emphasis. */
 .markdown-body :is(h1, h2, h3, h4, h5, h6, strong, b) code {
   font-weight: inherit;
+}
+
+/* A streaming reply's new blocks fade in as they mount: the tail arrives in
+   chunks and the gentle entrance keeps it from flashing. Finished blocks keep
+   their DOM node (splitMarkdownBlocks is stable), so each plays once. */
+.markdown-body.is-streaming > * {
+  animation: markdown-block-fade-in 160ms ease-out both;
+}
+@keyframes markdown-block-fade-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: none; }
 }
 
 /* react-markdown output styles */

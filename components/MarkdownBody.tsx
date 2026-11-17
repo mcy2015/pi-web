@@ -227,7 +227,7 @@ export const MarkdownBody = memo(function MarkdownBody({ children, className, is
   }), [cwd, isStreaming, onOpenFile, onNavigateLink]);
 
   return (
-    <div className={["markdown-body", className].filter(Boolean).join(" ")}>
+    <div className={["markdown-body", isStreaming ? "is-streaming" : null, className].filter(Boolean).join(" ")}>
       {blocks.map((block, index) => {
         // While streaming, a block that is only a code fence skips the markdown
         // parser: a long fence grows every chunk, and parsing all of it again

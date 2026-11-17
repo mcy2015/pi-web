@@ -478,6 +478,10 @@ test("shows a user message's HTML as the text typed, like pi's TUI", () => {
   const escaped = sample.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
   assert.equal(renderMarkdown(sample, { keepLineBreaks: true }), `<div class="markdown-body"><p>${escaped}</p></div>`);
 
+  // Only a streaming body carries the fade-in modifier; finished messages render untouched.
+  assert.match(renderMarkdown("hello", { isStreaming: true }), /<div class="markdown-body is-streaming">/);
+  assert.match(renderMarkdown("hello"), /<div class="markdown-body">/);
+
   // Inline and block HTML, raw-text tags included, keep their characters and line breaks.
   assert.match(renderMarkdown("normal <kbd>Ctrl</kbd>\nline two", { keepLineBreaks: true }), /<p>normal &lt;kbd&gt;Ctrl&lt;\/kbd&gt;<br\/>line two<\/p>/);
   assert.match(renderMarkdown("Use a <textarea> here\nand a button", { keepLineBreaks: true }), /<p>Use a &lt;textarea&gt; here<br\/>and a button<\/p>/);
