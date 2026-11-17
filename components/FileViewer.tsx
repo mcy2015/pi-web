@@ -33,6 +33,7 @@ import { FrontmatterCard } from "./FrontmatterCard";
 import { diffGapLabel, parseUnifiedPatch, unifiedDiffLines, type SplitDiffGap, type UnifiedDiffLine } from "@/lib/patch";
 import type { GitFileDiffResponse } from "@/lib/git-types";
 import { useI18n } from "@/hooks/useI18n";
+import { AddToChatButton, CopyImageButton } from "./FileViewerImageActions";
 import {
   resolveInitialFileDisplayMode,
   resolveInitialWrapLines,
@@ -57,6 +58,8 @@ interface Props {
   initialState?: FileViewerState;
   onStateChange?: (state: FileViewerState) => void;
   watchEnabled?: boolean;
+  /** Attach the image to the chat input (the composer's drop path). Absent on the /files page, which has no composer. */
+  onAddToChat?: (filePath: string) => void | Promise<void>;
 }
 
 interface FileData {
@@ -254,7 +257,7 @@ function SourceCodeRenderer({ rows, stylesheet, useInlineStyles, wrapLines }: So
   });
 }
 
-function getFileApiUrl(
+export function getFileApiUrl(
   filePath: string,
   type: "read" | "download" | "meta" | "preview" | "watch",
   sourceSessionId?: string | null,
@@ -585,7 +588,7 @@ function DiffView({
 // SOURCE_HIGHLIGHT_MAX_LINES lines again.
 const MemoizedDiffView = memo(DiffView);
 
-function ImageViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }: Props) {
+function ImageViewer({ filePath, cwd, sourceSessionId, watchEnabled = true, onAddToChat }: Props) {
   const { t } = useI18n();
   const [watching, setWatching] = useState(false);
   const [watchAttempt, superviseWatch] = useWatchRecovery();
@@ -718,6 +721,8 @@ function ImageViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }: Pr
           />
           {watching ? "live" : "static"}
         </span>
+        {onAddToChat && <AddToChatButton filePath={filePath} onAddToChat={onAddToChat} />}
+        <CopyImageButton url={src} isAnimatedGif={getFileExt(filePath) === "gif"} />
         <DownloadLink filePath={filePath} sourceSessionId={sourceSessionId} />
       </div>
       <div
@@ -1287,6 +1292,7 @@ export function FileViewer({
   onOpenFile,
   onMentionLines,
   onAtMention,
+  onAddToChat,
   gitRefreshKey,
   initialDisplayMode,
   initialState,
@@ -1300,7 +1306,7 @@ export function FileViewer({
   const pageHidden = usePageHiddenFor(HIDDEN_PAGE_GRACE_MS);
   const watchEnabled = watchRequested && !pageHidden;
   if (isImagePath(filePath)) {
-    return <ImageViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} watchEnabled={watchEnabled} />;
+    return <ImageViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} watchEnabled={watchEnabled} onAddToChat={onAddToChat} />;
   }
   if (isAudioPath(filePath)) {
     return <AudioViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} watchEnabled={watchEnabled} />;

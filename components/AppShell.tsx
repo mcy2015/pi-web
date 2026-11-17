@@ -7,7 +7,7 @@ import { SessionSidebar, type SelectSessionOptions, type SessionSidebarControl }
 import { ChatWindow } from "./ChatWindow";
 import { NewSessionContextBar, type NewSessionContextControl } from "./NewSessionContextBar";
 import type { ChatScrollPosition } from "@/lib/chat-scroll-position";
-import { FileViewer } from "./FileViewer";
+import { FileViewer, getFileApiUrl } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
 import { movePanelTab, orderPanelTabs } from "@/lib/panel-tab-order";
 import { openFileTab, saveFileViewerState, saveParkedFileViewerState, switchFileWorkspace, type ParkedFileWorkspace } from "./file-tab-state";
@@ -33,6 +33,8 @@ import { useViewportHeight } from "@/hooks/useViewportHeight";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { useAudio } from "@/hooks/useAudio";
 import { copyText } from "@/lib/clipboard";
+import { fetchImageAsFile } from "@/lib/image-actions";
+import { MAX_ATTACHED_IMAGE_BYTES } from "@/lib/image-attachments";
 import { getFileName } from "@/lib/file-paths";
 import { buildAtMentionText, buildFileAtMentionsText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import {
@@ -743,6 +745,19 @@ export function AppShell() {
 
   const handleFileLineMention = useCallback((relativePath: string, startLine: number, endLine: number) => {
     chatInputRef.current?.insertText(buildFileLineMentionText(relativePath, startLine, endLine));
+    if (isMobile) { setRightPanelOpen(false); setSidebarOpen(false); }
+  }, [isMobile]);
+
+  // The image viewer's toolbar button: the file arrives as a File the composer
+  // attaches like a dropped one. A failure rejects to the button, which shows
+  // its own error state.
+  const handleAddImageToChat = useCallback(async (filePath: string, sourceSessionId?: string | null) => {
+    const file = await fetchImageAsFile(getFileApiUrl(filePath, "download", sourceSessionId), getFileName(filePath));
+    // The composer silently drops images past its own ceiling (the same rule
+    // as a paste); refuse here instead so the button shows its error state.
+    if (file.size > MAX_ATTACHED_IMAGE_BYTES) throw new Error("Image is too large to attach");
+    chatInputRef.current?.addImages([file]);
+    chatInputRef.current?.focus();
     if (isMobile) { setRightPanelOpen(false); setSidebarOpen(false); }
   }, [isMobile]);
 
@@ -3257,6 +3272,7 @@ export function AppShell() {
                 getFileName(filePath),
                 { sourceSessionId: activeFileTab.sourceSessionId, page },
               )}
+              onAddToChat={(filePath) => handleAddImageToChat(filePath, activeFileTab.sourceSessionId)}
             />
           ) : !terminalTabs.some((tab) => tab.id === activeFileTabId) && !activeAgentTab && !activeGitGraphTab ? (
             <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
