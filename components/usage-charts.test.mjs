@@ -8,7 +8,9 @@ const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
   moduleCache: false,
 });
-const { trendPoints, trendLabelIndexes, heatLevel, buildHeatmapWeeks, heatmapBars, heatmapMonthGroups, monotonePath } = await jiti.import("./usage-charts.tsx");
+const { trendPoints, trendLabelIndexes, heatLevel, buildHeatmapWeeks, heatmapBars, heatmapMonthGroups, monotonePath, donutEntries, donutArcs } = await jiti.import("./usage-charts.tsx");
+
+const DONUT_CIRCUMFERENCE = 2 * Math.PI * 44; // components/usage-charts.tsx DONUT_RADIUS
 
 
 test("trendPoints maps values into the padded viewBox", () => {
@@ -149,4 +151,51 @@ test("monotonePath smooths without overshooting its data", () => {
   const ys = [...peak.matchAll(/([-\d.]+) ([-\d.]+)/g)].map((m) => Number(m[2]));
   assert.ok(Math.max(...ys) <= 10, `overshoot: ${ys}`);
   assert.ok(Math.min(...ys) >= 0, `undershoot: ${ys}`);
+});
+
+test("donutEntries keeps models with usage and merges the rest beyond six", () => {
+  const models = [
+    { model: "a", total: 184 },
+    { model: "b", total: 166 },
+    { model: "c", total: 89 },
+    { model: "d", total: 35 },
+    { model: "zero", total: 0 }, // no usage: not drawn, not listed
+  ];
+  const entries = donutEntries(models, "other");
+  assert.deepEqual(entries.map((entry) => entry.key), ["a", "b", "c", "d"]);
+
+  const many = donutEntries(
+    ["a", "b", "c", "d", "e", "f", "g"].map((model) => ({ model, total: 10 })),
+    "other",
+  );
+  assert.equal(many.length, 6);
+  assert.deepEqual(many.slice(0, 5).map((entry) => entry.key), ["a", "b", "c", "d", "e"]);
+  assert.equal(many[5].key, "__other__");
+  assert.equal(many[5].value, 20);
+});
+
+test("donutArcs spans the ring exactly once, seams meeting edge to edge", () => {
+  const models = [
+    { model: "a", total: 184 },
+    { model: "b", total: 166 },
+    { model: "c", total: 89 },
+    { model: "d", total: 35 },
+  ];
+  const arcs = donutArcs(donutEntries(models, "other"), DONUT_CIRCUMFERENCE);
+
+  // Dashes sum to exactly one circumference: a smaller period (like a bare
+  // 100) repeats each model's color around the donut.
+  const dashSum = arcs.reduce((acc, arc) => acc + arc.dash, 0);
+  assert.ok(Math.abs(dashSum - DONUT_CIRCUMFERENCE) < 1e-9, dashSum);
+
+  // Each arc starts where the previous one ends — no gaps, no overlaps.
+  let start = 0;
+  for (const arc of arcs) {
+    assert.ok(Math.abs(-arc.offset - start) < 1e-9, arc.entry.key);
+    assert.ok(Math.abs(arc.dash + arc.gap - DONUT_CIRCUMFERENCE) < 1e-9, arc.entry.key);
+    start += arc.dash;
+  }
+
+  // Shares land on the legend's rounded percentages (39/35/19/7 of 474).
+  assert.deepEqual(arcs.map((arc) => Math.round(arc.entry.share * 100)), [39, 35, 19, 7]);
 });

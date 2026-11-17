@@ -232,6 +232,11 @@ export function donutArcs(
   return arcs;
 }
 
+const DONUT_RADIUS = 44;
+/** The SVG circle's real path length (2πr): dash values must sum to exactly
+ * one circumference — a smaller period repeats each arc around the ring. */
+const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_RADIUS;
+
 export function UsageModelDonut({
   models,
   otherLabel,
@@ -246,7 +251,7 @@ export function UsageModelDonut({
   const entries = donutEntries(models, otherLabel);
   if (entries.length === 0) return null;
   const total = entries.reduce((acc, entry) => acc + entry.value, 0);
-  const arcs = donutArcs(entries, 100);
+  const arcs = donutArcs(entries, DONUT_CIRCUMFERENCE);
   return (
     <div className="usage-donut">
       <div className="usage-donut-chart">
@@ -255,7 +260,7 @@ export function UsageModelDonut({
           {arcs.map((arc) => (
             <circle
               key={arc.entry.key}
-              cx="60" cy="60" r="44" fill="none"
+              cx="60" cy="60" r={DONUT_RADIUS} fill="none"
               stroke={arc.entry.color}
               strokeWidth="14"
               strokeDasharray={`${arc.dash} ${arc.gap}`}
