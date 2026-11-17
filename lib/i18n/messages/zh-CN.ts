@@ -936,6 +936,8 @@ export const zhCNLocale: LocalePlugin = {
     "chat.messages": "条消息",
     "chat.toolCall": "次工具调用",
     "chat.toolCalls": "次工具调用",
+    "chat.toolCallGroupCount": "× {count}",
+    "chat.toolCallGroupAllOk": "全部成功",
     "chat.turnDuration": "耗时 {time}",
     "chat.viewFullOutput": "查看完整输出",
     "chat.loadingFullOutput": "加载中…",

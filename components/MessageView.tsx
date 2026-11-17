@@ -16,8 +16,9 @@ import { formatTurnDuration } from "@/lib/turn-duration";
 import { toolClockMs, type ToolClock, type ToolClocks } from "@/lib/tool-clock";
 import { diffGapLabel, parseUnifiedPatch, unifiedDiffLines, type SplitDiffCell, type SplitDiffFile, type SplitDiffGap, type UnifiedDiffLine } from "@/lib/patch";
 import { editPreviewFile } from "@/lib/edit-preview";
-import { applyPatchPreviewToFiles, applyPatchResultHasFailures, extractApplyPatchPaths, getApplyPatchInputText, parseApplyPatchInput } from "@/lib/apply-patch";
+import { applyPatchPreviewToFiles, extractApplyPatchPaths, getApplyPatchInputText, parseApplyPatchInput } from "@/lib/apply-patch";
 import { isApplyPatchToolName, isEditToolName, isWriteToolName } from "@/lib/tool-names";
+import { groupConsecutiveToolCalls, toolCallHasError, type BlockItem } from "@/lib/tool-call-grouping";
 import { isToolCallExpanded, setToolCallExpanded } from "@/lib/tool-call-expansion";
 import { isThinkingExpandedByDefault, THINKING_EXPANDED_EVENT } from "@/lib/thinking-expansion-preference";
 import { TurnWrittenFiles } from "./TurnWrittenFiles";
@@ -742,6 +743,7 @@ function AssistantMessageView({
     .map((block, originalIndex) => ({ block, originalIndex }))
     .filter(({ block }) => !isEmptyThinkingBlock(block, { isStreaming })), [message.content, isStreaming]);
   const blocks = useMemo(() => blockItems.map(({ block }) => block), [blockItems]);
+  const segments = useMemo(() => groupConsecutiveToolCalls(blockItems, toolResults, { isStreaming }), [blockItems, toolResults, isStreaming]);
   const providerError = getAssistantErrorMessage(message, { isStreaming });
   const aborted = isAssistantAborted(message, { isStreaming });
   const truncated = isAssistantTruncated(message, { isStreaming });
@@ -881,6 +883,12 @@ function AssistantMessageView({
 
   if (blocks.length === 0 && !isStreaming && !providerError && !truncated && !aborted) return null;
 
+  // Not keyed by the entry id: a message of this run gets one when the file is
+  // read again, and its blocks keep their state across that read (#1184).
+  const renderBlock = ({ block, originalIndex }: BlockItem) => (
+    <BlockView key={originalIndex} block={block} searchTarget={block === searchBlock} toolResults={toolResults} toolsNotRun={aborted || providerError !== null} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} toolClocks={toolClocks} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onEnterSubagent={onEnterSubagent} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} />
+  );
+
   return (
     <div
       data-message-role="assistant"
@@ -896,10 +904,10 @@ function AssistantMessageView({
       />
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {/* Not keyed by the entry id: a message of this run gets one when the file is
-            read again, and its blocks keep their state across that read (#1184). */}
-        {blockItems.map(({ block, originalIndex }) => (
-          <BlockView key={originalIndex} block={block} searchTarget={block === searchBlock} toolResults={toolResults} toolsNotRun={aborted || providerError !== null} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} toolClocks={toolClocks} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onEnterSubagent={onEnterSubagent} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} />
+        {segments.map((segment) => segment.kind === "block" ? renderBlock(segment) : (
+          <ToolCallGroup key={`group-${segment.firstOriginalIndex}`} items={segment.items} entryId={entryId} results={segment.items.map(({ block }) => toolResults?.get(block.toolCallId))} forceExpanded={segment.items.some(({ block }) => block === searchBlock)}>
+            {segment.items.map(renderBlock)}
+          </ToolCallGroup>
         ))}
       </div>
 
@@ -1183,6 +1191,82 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex 
   );
 }
 
+/**
+ * One summary card for a run of consecutive same-tool calls that all
+ * succeeded: folded it shows "read × 4, all succeeded"; expanded, the cards
+ * themselves as children. Its own state — not persisted, unlike a single
+ * card's remembered fold (lib/tool-call-expansion).
+ */
+export function ToolCallGroup({ items, entryId, results, forceExpanded, children }: {
+  items: { block: ToolCallContent; originalIndex: number }[];
+  entryId?: string;
+  results?: (ToolResultMessage | undefined)[];
+  forceExpanded?: boolean;
+  children?: ReactNode;
+}) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  const isOpen = expanded || forceExpanded === true;
+  // `server/tool` instead of the registered `mcp__server__tool`, as pi's TUI shows it.
+  const firstResult = results?.find((result) => result !== undefined);
+  const mcpLabel = mcpToolLabel(items[0].block.toolName, firstResult?.details);
+  return (
+    <div
+      data-tool-call-group
+      data-group-key={`${entryId ?? ""}:${items[0].originalIndex}`}
+      style={{
+        borderRadius: 7,
+        overflow: "hidden",
+        fontSize: 12,
+        border: "1px solid rgba(34,197,94,0.25)",
+        background: "rgba(34,197,94,0.04)",
+      }}
+    >
+      <button
+        type="button"
+        aria-expanded={isOpen}
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 7,
+          flex: 1,
+          minWidth: 0,
+          padding: "6px 10px",
+          background: "none",
+          border: "none",
+          color: "var(--text-muted)",
+          cursor: "pointer",
+          fontSize: 12,
+          textAlign: "left",
+        }}
+      >
+        <span
+          title={mcpLabel ? items[0].block.toolName : undefined}
+          style={{ color: "#16a34a", fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 11, flexShrink: 0 }}
+        >
+          {mcpLabel ? (
+            <>
+              <span style={{ fontWeight: 500, opacity: 0.75 }}>{mcpLabel.server}/</span>
+              {mcpLabel.tool}
+            </>
+          ) : items[0].block.toolName}
+        </span>
+        <span style={{ color: "var(--text-dim)", fontSize: 11, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
+          {t("chat.toolCallGroupCount", { count: items.length })}
+        </span>
+        <span style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)", fontSize: 11, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {t("chat.toolCallGroupAllOk")}
+        </span>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--text-dim)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
+          <polyline points="2 3.5 5 6.5 8 3.5" />
+        </svg>
+      </button>
+      {isOpen && <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{children}</div>}
+    </div>
+  );
+}
+
 /** A duration pi recorded on a message, or undefined when there is none to trust. */
 function recordedDurationMs(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
@@ -1281,8 +1365,7 @@ function ToolCallBlock({ block, result, notRun, duration, clock, onOpenSubagent,
   const resultText = mcpLabel && joinedResultText !== null ? prettyMcpResultText(joinedResultText) : joinedResultText;
   const resultImages = getMessageImages(resultContent);
   const resultIsEmpty = resultText === null ? false : (resultText.trim() === "(no output)" || resultText.trim() === "");
-  const isError = (result?.isError ?? false)
-    || (isApplyPatchToolName(block.toolName) && applyPatchResultHasFailures(result?.details));
+  const isError = toolCallHasError(block, result);
   const subagent = isSubagentToolDetails(result?.details) ? result.details : null;
   const codemodeCallCount = codemode ? codemode.calls.length + codemode.omitted : 0;
 

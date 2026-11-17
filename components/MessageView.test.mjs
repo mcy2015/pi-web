@@ -16,6 +16,7 @@ const {
   MessageView,
   PatchDiffFiles,
   ThinkingBlock,
+  ToolCallGroup,
   formatToolDuration,
   getModelDisplayName,
   getTokenEstimateText,
@@ -1284,4 +1285,121 @@ test("one column names a deleted file's section by its old path", () => {
 
   assert.ok(html.includes(">a/gone.ts<"));
   assert.ok(!html.includes("/dev/null"));
+});
+
+function groupedReads(paths) {
+  const reads = paths.map((path, index) => ({
+    type: "toolCall",
+    toolCallId: `group-read-${index}`,
+    toolName: "read",
+    input: { path },
+  }));
+  return {
+    reads,
+    message: { role: "assistant", provider: "anthropic", model: "claude-test", content: reads },
+    okResults: new Map(reads.map((block) => [block.toolCallId, {
+      role: "toolResult",
+      toolCallId: block.toolCallId,
+      content: [{ type: "text", text: `text of ${block.input.path}` }],
+    }])),
+  };
+}
+
+test("a run of successful reads folds into one summary card", () => {
+  const paths = ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"];
+  const { message, okResults } = groupedReads(paths);
+  const html = renderMessage(message, { toolResults: okResults });
+
+  assert.equal(countIn(html, "data-tool-call-group"), 1);
+  assert.match(html, /× 4/);
+  assert.match(html, /all succeeded/);
+  assert.match(html, /aria-expanded="false"/);
+  // The cards stay unrendered behind the fold: neither their paths — which each
+  // collapsed card's header shows — nor their results appear anywhere.
+  for (const path of paths) assert.ok(!html.includes(path), path);
+  assert.ok(!html.includes("text of"));
+});
+
+test("a search target inside a folded group forces it open", () => {
+  const paths = ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"];
+  const { reads, message, okResults } = groupedReads(paths);
+  const html = renderMessage(message, { toolResults: okResults, searchBlock: reads[1] });
+
+  assert.equal(countIn(html, "data-tool-call-group"), 1);
+  assert.match(html, /aria-expanded="true"/);
+  // Forced open, the cards render behind the group header. (The toolCall
+  // branch carries no data-search-target; the open cards are the evidence.)
+  assert.ok(html.includes("src/b.ts"));
+});
+
+test("a streaming message keeps its tool calls as individual cards", () => {
+  const paths = ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"];
+  const { message, okResults } = groupedReads(paths);
+  const html = renderMessage(message, { toolResults: okResults, isStreaming: true });
+
+  assert.equal(countIn(html, "data-tool-call-group"), 0);
+  assert.doesNotMatch(html, /all succeeded/);
+  for (const path of paths) assert.ok(html.includes(path), path);
+});
+
+test("a failed call among the run keeps every card", () => {
+  const paths = ["src/a.ts", "src/b.ts", "src/missing.ts", "src/d.ts"];
+  const { reads, message, okResults } = groupedReads(paths);
+  okResults.set(reads[2].toolCallId, {
+    role: "toolResult",
+    toolCallId: reads[2].toolCallId,
+    isError: true,
+    content: [{ type: "text", text: "No such file" }],
+  });
+  const html = renderMessage(message, { toolResults: okResults });
+
+  assert.equal(countIn(html, "data-tool-call-group"), 0);
+  assert.doesNotMatch(html, /all succeeded/);
+  for (const path of paths) assert.ok(html.includes(path), path);
+});
+
+test("ToolCallGroup keeps its children behind the fold until opened", () => {
+  const items = [0, 1, 2].map((originalIndex) => ({
+    block: { type: "toolCall", toolCallId: `group-direct-${originalIndex}`, toolName: "read", input: {} },
+    originalIndex,
+  }));
+  const render = (props) => renderToStaticMarkup(React.createElement(
+    I18nProvider,
+    null,
+    React.createElement(ToolCallGroup, { items, ...props }, React.createElement("div", null, "GROUP-CHILD-MARKER")),
+  ));
+
+  const collapsed = render();
+  assert.match(collapsed, /aria-expanded="false"/);
+  assert.ok(!collapsed.includes("GROUP-CHILD-MARKER"));
+
+  const expanded = render({ forceExpanded: true });
+  assert.match(expanded, /aria-expanded="true"/);
+  assert.ok(expanded.includes("GROUP-CHILD-MARKER"));
+});
+
+test("an MCP group's header shows the server and tool its result names", () => {
+  const calls = [0, 1, 2].map((index) => ({
+    type: "toolCall",
+    toolCallId: `group-mcp-${index}`,
+    toolName: "mcp__docs__search",
+    input: { query: `q${index}` },
+  }));
+  const html = renderMessage({
+    role: "assistant",
+    provider: "anthropic",
+    model: "claude-test",
+    content: calls,
+  }, {
+    toolResults: new Map(calls.map((block) => [block.toolCallId, {
+      role: "toolResult",
+      toolCallId: block.toolCallId,
+      content: [{ type: "text", text: `hit ${block.input.query}` }],
+      details: { server: "docs", tool: "search" },
+    }])),
+  });
+
+  assert.equal(countIn(html, "data-tool-call-group"), 1);
+  assert.match(html, /docs\//);
+  assert.match(html, /title="mcp__docs__search"/);
 });
