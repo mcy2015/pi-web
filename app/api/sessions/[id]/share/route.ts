@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { parseShareDurationBody } from "@/lib/share-request";
 import { getShare, putShare, removeShare, summarizeShare } from "@/lib/share-store";
 import { buildShareSnapshot, ShareSnapshotError } from "@/lib/share-snapshot";
 
@@ -20,11 +21,19 @@ export async function GET(_req: Request, { params }: Params) {
   }
 }
 
-export async function POST(_req: Request, { params }: Params) {
+export async function POST(req: Request, { params }: Params) {
   const { id } = await params;
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+  const parsed = parseShareDurationBody(body);
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
   try {
     const snapshot = await buildShareSnapshot(id);
-    const share = await putShare(id, snapshot);
+    const share = await putShare(id, snapshot, undefined, { durationDays: parsed.durationDays });
     return NextResponse.json(summarizeShare(share));
   } catch (error) {
     if (error instanceof ShareSnapshotError) {

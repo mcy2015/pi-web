@@ -999,6 +999,35 @@ html[data-keyboard-open] .sidebar-sheet {
   line-height: 1.4;
 }
 
+/* The link-validity select (1 / 7 / 30 days / forever) both panel states
+   show, as the select's row: a quiet label and a native select that match
+   the buttons' metrics. */
+.sidebar-share-duration {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 0 4px;
+}
+
+.sidebar-share-duration-label {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.sidebar-share-duration-select {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 12px;
+}
+
 .sidebar-sheet .sidebar-share-panel {
   padding: 4px 16px 4px;
 }
@@ -1009,6 +1038,11 @@ html[data-keyboard-open] .sidebar-sheet {
 }
 
 .sidebar-sheet .sidebar-share-buttons button {
+  height: 40px;
+  font-size: 14px;
+}
+
+.sidebar-sheet .sidebar-share-duration-select {
   height: 40px;
   font-size: 14px;
 }

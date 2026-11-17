@@ -3,6 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { copyText } from "@/lib/clipboard";
+import { formatRelativeTime } from "@/lib/i18n/format";
+import {
+  DEFAULT_SHARE_DURATION_DAYS,
+  isShareDurationDays,
+  type ShareDurationDays,
+} from "@/lib/share-types";
 
 /**
  * A session row's "Share…" body (components/SessionSidebar.tsx, a SidebarMenu
@@ -19,7 +25,35 @@ import { copyText } from "@/lib/clipboard";
 export interface ShareInfo {
   code: string;
   createdAt: string;
+  /** ISO UTC; null = permanent. */
+  expiresAt: string | null;
+  /** The tier the select opens on, resolved server-side. */
+  durationDays: ShareDurationDays;
   title: string;
+}
+
+/** The POST body a create or refresh sends for a duration. */
+export function shareCreateBody(durationDays: ShareDurationDays): string {
+  return JSON.stringify({ durationDays });
+}
+
+/** The choices a share's duration select offers, in display order. */
+export const SHARE_DURATION_OPTIONS: { value: ShareDurationDays; labelKey: string }[] = [
+  { value: 1, labelKey: "share.duration1Day" },
+  { value: 7, labelKey: "share.duration7Days" },
+  { value: 30, labelKey: "share.duration30Days" },
+  { value: null, labelKey: "share.durationForever" },
+];
+
+/** A duration as its select's option value ("" = permanent). */
+export function shareDurationOptionValue(duration: ShareDurationDays): string {
+  return duration === null ? "" : String(duration);
+}
+
+/** Back from the select: the value is one of the four options or the default. */
+export function parseShareDurationOptionValue(value: string): ShareDurationDays {
+  const duration: unknown = value === "" ? null : Number(value);
+  return isShareDurationDays(duration) ? duration : DEFAULT_SHARE_DURATION_DAYS;
 }
 
 export type SharePanelState =
@@ -74,6 +108,7 @@ export function SharePanel({
   const [busy, setBusy] = useState<"create" | "stop" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [stopArmed, setStopArmed] = useState(false);
+  const [duration, setDuration] = useState<ShareDurationDays>(DEFAULT_SHARE_DURATION_DAYS);
   const [messageCount, setMessageCount] = useState<number | null>(null);
   const request = fetchImpl ?? fetch;
   const pageOrigin = origin ?? (typeof window === "undefined" ? "" : window.location.origin);
@@ -97,6 +132,11 @@ export function SharePanel({
           return;
         }
         setState(data.share ? { status: "shared", share: data.share } : { status: "unshared" });
+        if (data.share) {
+          // The select opens on the share's current tier, resolved server-side
+          // (stored durationDays first, inference for old files).
+          setDuration(data.share.durationDays);
+        }
       })
       .catch((reason: unknown) => {
         if (active) setState({ status: "load-failed", error: errorText(reason) });
@@ -132,16 +172,16 @@ export function SharePanel({
     request(`/api/sessions/${encodeURIComponent(sessionId)}/share`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: "{}",
+      body: shareCreateBody(duration),
     })
       .then(async (response) => {
-        const data = await response.json().catch(() => ({})) as { code?: string; createdAt?: string; title?: string; error?: string };
+        const data = await response.json().catch(() => ({})) as { code?: string; createdAt?: string; expiresAt?: string | null; durationDays?: ShareDurationDays; title?: string; error?: string };
         if (!activeCreateOk(data)) {
           const { key, params } = shareCreateFailure(data, response.status);
           setError(t(key, params));
           return;
         }
-        setState({ status: "shared", share: { code: data.code, createdAt: data.createdAt, title: data.title } });
+        setState({ status: "shared", share: { code: data.code, createdAt: data.createdAt, expiresAt: data.expiresAt, durationDays: data.durationDays, title: data.title } });
         setStopArmed(false);
       })
       .catch((reason: unknown) => {
@@ -151,7 +191,7 @@ export function SharePanel({
         pendingRef.current = false;
         setBusy(null);
       });
-  }, [request, sessionId, t]);
+  }, [duration, request, sessionId, t]);
 
   // Stop sharing asks first: the first click only arms the button, the second
   // sends the DELETE that takes the link away.
@@ -201,18 +241,24 @@ export function SharePanel({
       busy={busy}
       error={error}
       stopArmed={stopArmed}
+      duration={duration}
       origin={pageOrigin}
       onCopy={copy}
       onCreate={create}
       onRefresh={create}
       onStop={stop}
+      onDurationChange={setDuration}
     />
   );
 }
 
-/** A POST answer a share can be built from. */
-function activeCreateOk(data: { code?: string; createdAt?: string; title?: string }): data is { code: string; createdAt: string; title: string } {
-  return typeof data.code === "string" && typeof data.createdAt === "string" && typeof data.title === "string";
+/** A POST answer a share can be built from. `expiresAt` may be null (permanent). */
+function activeCreateOk(data: { code?: string; createdAt?: string; expiresAt?: string | null; durationDays?: ShareDurationDays; title?: string }): data is { code: string; createdAt: string; expiresAt: string | null; durationDays: ShareDurationDays; title: string } {
+  return typeof data.code === "string"
+    && typeof data.createdAt === "string"
+    && (data.expiresAt === null || typeof data.expiresAt === "string")
+    && isShareDurationDays(data.durationDays)
+    && typeof data.title === "string";
 }
 
 /** The panel in any state, without the fetches; exported for tests. */
@@ -222,22 +268,27 @@ export function SharePanelView({
   busy,
   error,
   stopArmed,
+  duration,
   origin,
   onCopy,
   onCreate,
   onRefresh,
   onStop,
+  onDurationChange,
 }: {
   state: SharePanelState;
   messageCount: number | null;
   busy: "create" | "stop" | null;
   error: string | null;
   stopArmed: boolean;
+  /** The duration the select shows; both states share one control. */
+  duration: ShareDurationDays;
   origin: string;
   onCopy: () => void;
   onCreate: () => void;
   onRefresh: () => void;
   onStop: () => void;
+  onDurationChange: (duration: ShareDurationDays) => void;
 }) {
   const { t } = useI18n();
   return (
@@ -255,6 +306,7 @@ export function SharePanelView({
           {messageCount !== null && (
             <p className="sidebar-share-note">{t("share.summary", { count: messageCount })}</p>
           )}
+          <ShareDurationSelect duration={duration} onDurationChange={onDurationChange} label={t("share.durationLabel")} />
           <div className="sidebar-share-buttons">
             <button
               type="button"
@@ -272,6 +324,10 @@ export function SharePanelView({
         <>
           <div className="sidebar-share-link-label">{t("share.linkLabel")}</div>
           <code className="sidebar-share-link">{shareLinkUrl(origin, state.share.code)}</code>
+          <ShareValidityLine expiresAt={state.share.expiresAt} />
+          {/* The select says what a Refresh would roll to; the line above says
+              what the link is now — each fact once. */}
+          <ShareDurationSelect duration={duration} onDurationChange={onDurationChange} label={t("share.durationLabel")} />
           <div className="sidebar-share-buttons">
             <button type="button" className="sidebar-share-copy" data-sidebar-menu-autofocus="" onClick={onCopy}>
               {t("share.copy")}
@@ -295,4 +351,55 @@ export function SharePanelView({
       {error && <div role="alert" className="sidebar-share-error">{error}</div>}
     </div>
   );
+}
+
+/** The one duration control both panel states share: a label plus a native
+ * select (a segmented control would not fit the menu's narrow body). */
+function ShareDurationSelect({ duration, onDurationChange, label }: {
+  duration: ShareDurationDays;
+  onDurationChange: (duration: ShareDurationDays) => void;
+  label: string;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="sidebar-share-duration">
+      <span className="sidebar-share-duration-label">{label}</span>
+      <select
+        className="sidebar-share-duration-select"
+        aria-label={label}
+        value={shareDurationOptionValue(duration)}
+        onChange={(event) => onDurationChange(parseShareDurationOptionValue(event.target.value))}
+      >
+        {SHARE_DURATION_OPTIONS.map((option) => (
+          <option key={option.labelKey} value={shareDurationOptionValue(option.value)}>
+            {t(option.labelKey)}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+/** Whether a parsed expiry timestamp has passed. Module-level so the check
+ * stays out of render (react-hooks/purity); the `now` default is for tests. */
+function shareMsExpired(ms: number, now = Date.now()): boolean {
+  return now >= ms;
+}
+
+/** The link's current validity: what it is now, under the link itself. An
+ * expired link says so and points at Refresh (this panel's revive entry). */
+function ShareValidityLine({ expiresAt }: { expiresAt: string | null }) {
+  const { t, locale } = useI18n();
+  if (expiresAt === null) return <p className="sidebar-share-note">{t("share.permanent")}</p>;
+  const ms = Date.parse(expiresAt);
+  if (!Number.isFinite(ms)) return null;
+  if (shareMsExpired(ms)) {
+    return (
+      <>
+        <p className="sidebar-share-note">{t("share.expired")}</p>
+        <p className="sidebar-share-note">{t("share.expiredHint")}</p>
+      </>
+    );
+  }
+  return <p className="sidebar-share-note">{t("share.expiresIn", { time: formatRelativeTime(new Date(ms), locale) })}</p>;
 }

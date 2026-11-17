@@ -37,6 +37,7 @@ import { PluginsConfig } from "./PluginsConfig";
 import { McpConfig } from "./McpConfig";
 import { ChannelsConfig } from "./ChannelsConfig";
 import { AutomationsConfig } from "./AutomationsConfig";
+import { SharesConfig } from "./SharesConfig";
 import { ConfigButton, ConfigDetailNavigationContext, ConfigSwitch, type ConfigDetailNavigation } from "./SettingsUi";
 import { FontSettings } from "./FontSettings";
 
@@ -79,6 +80,7 @@ export function SettingsSectionIcon({ section, size = 16, strokeWidth = 1.8 }: {
   if (section === "mcp") return <svg {...common}><rect x="3" y="3" width="18" height="7" rx="2" /><rect x="3" y="14" width="18" height="7" rx="2" /><path d="M7 6.5h.01M7 17.5h.01M11 6.5h6M11 17.5h6" /></svg>;
   if (section === "channels") return <svg {...common}><path d="m21.5 4.5-2.9 13.2a1.6 1.6 0 0 1-2.5.9L12 15.6l-2.3 2.3a1 1 0 0 1-1.7-.5L7 13.6 3.4 12.2a.8.8 0 0 1-.1-1.5L20.2 3.2a.9.9 0 0 1 1.3 1.3Z" /><path d="m7 13.6 11.7-8.4L9.4 14.8" /></svg>;
   if (section === "automations") return <svg {...common}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3.5 2" /></svg>;
+  if (section === "shares") return <svg {...common}><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>;
   return <svg {...common}><path d="M9 7V2M15 7V2M6 13V8a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v5a6 6 0 0 1-12 0ZM12 19v3" /></svg>;
 }
 
@@ -715,6 +717,7 @@ export function SettingsPanel({
     { id: "mcp", label: t("settings.mcp") },
     { id: "channels", label: t("settings.channels") },
     { id: "automations", label: t("settings.automations") },
+    { id: "shares", label: t("settings.shares") },
   ] as const).map((item) => ({ ...item, requiresProject: settingsSectionRequiresProject(item.id) }));
   const sectionRequiresProject = settingsSectionRequiresProject(section);
   const isPhone = useIsMobile();
@@ -903,6 +906,7 @@ export function SettingsPanel({
           {sectionHost("mcp", <McpConfig embedded key={cwd ?? ""} cwd={cwd} trust={projectTrust} onTrustProject={onOpenTrustDialog} onProjectTrustChanged={onProjectTrustChanged} onClose={onClose} />)}
           {sectionHost("channels", <ChannelsConfig />)}
           {sectionHost("automations", <AutomationsConfig />)}
+          {sectionHost("shares", <SharesConfig />)}
           </ConfigDetailNavigationContext.Provider>
         </main>
       </div>

@@ -678,6 +678,10 @@ html.dark .web-login-error {
   color: var(--text-dim);
   text-align: center;
 }
+.shared-session-expired-body {
+  margin: 0;
+  color: var(--text-muted);
+}
 
 /* The terminal has its own light/dark choice (lib/terminal-theme.ts), apart
    from the app theme. Its backgrounds match the xterm palettes there. */
