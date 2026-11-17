@@ -31,6 +31,8 @@ import { DismissButton } from "./DismissButton";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useEnterSendMode } from "@/hooks/useEnterSendMode";
 import { useI18n } from "@/hooks/useI18n";
+import { speechLangForLocale, useSpeechInput } from "@/hooks/useSpeechInput";
+import type { SpeechErrorKind, SpeechStatus } from "@/hooks/useSpeechInput";
 import { useChatAppearance } from "@/hooks/useChatAppearance";
 import { useFontPreferences } from "@/hooks/useFontPreferences";
 import type { ToolPreset } from "@/lib/tool-presets";
@@ -717,6 +719,107 @@ export function ModelScopeWarningBanner({ warnings }: { warnings?: string[] }) {
   );
 }
 
+/** The composer's dictation toggle, beside the send button. */
+export function SpeechMicButton({ listening, title, ariaLabel, isMobile, onClick }: {
+  listening: boolean;
+  title: string;
+  ariaLabel: string;
+  isMobile: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label={ariaLabel}
+      aria-pressed={listening}
+      style={{
+        flexShrink: 0,
+        alignSelf: "flex-end",
+        display: "grid",
+        placeItems: "center",
+        ...(isMobile ? { width: 36, height: 36 } : { width: 34, height: 34 }),
+        background: "transparent",
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        color: listening ? "var(--accent)" : "var(--text-muted)",
+        cursor: "pointer",
+      }}
+    >
+      <svg
+        width="15"
+        height="15"
+        viewBox="0 0 24 24"
+        fill={listening ? "currentColor" : "none"}
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <rect x="9" y="2" width="6" height="12" rx="3" />
+        <path d="M5 10a7 7 0 0 0 14 0" />
+        <line x1="12" y1="17" x2="12" y2="21" />
+      </svg>
+    </button>
+  );
+}
+
+/** Dictation state under the composer: the live interim while listening, the error and its retry otherwise. */
+export function SpeechStatusLine({ status, errorKind, interim, onRetry, t }: {
+  status: SpeechStatus;
+  errorKind: SpeechErrorKind | null;
+  interim: string;
+  onRetry: () => void;
+  t: (key: string) => string;
+}) {
+  if (status === "idle") return null;
+  if (status === "listening") {
+    return (
+      <div className="text-xs px-2 py-1" style={{ marginTop: 4, display: "flex", gap: 8, alignItems: "baseline" }}>
+        <span style={{ flexShrink: 0, color: "var(--accent)" }}>{t("chat.speechListening")}</span>
+        {interim ? (
+          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-muted)" }}>{interim}</span>
+        ) : null}
+      </div>
+    );
+  }
+  // The literal red of ModelNoticeBanner: the theme has no --danger token.
+  const insecure = typeof window !== "undefined" && window.isSecureContext === false;
+  const copy = (() => {
+    switch (errorKind) {
+      case "mic":
+        return { title: t("chat.speechNoMic") };
+      case "network":
+        return { title: t("chat.speechNetwork") };
+      case "permission":
+        // An insecure origin never gets as far as a permission prompt; the
+        // HTTPS guidance is the message that helps then.
+        return insecure
+          ? { title: t("chat.speechInsecure") }
+          : { title: t("chat.speechPermissionDenied"), hint: t("chat.speechPermissionHint") };
+      default:
+        return { title: t("chat.speechUnavailable") };
+    }
+  })();
+  return (
+    <div className="text-xs px-2 py-1" role="status" style={{ marginTop: 4, display: "flex", gap: 8, alignItems: "baseline", color: "rgba(239,68,68)" }}>
+      <span style={{ flexShrink: 0 }}>{copy.title}</span>
+      {copy.hint ? (
+        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-muted)" }}>{copy.hint}</span>
+      ) : null}
+      <button
+        type="button"
+        onClick={onRetry}
+        style={{ flexShrink: 0, background: "none", border: "none", padding: 0, cursor: "pointer", color: "inherit", textDecoration: "underline", font: "inherit" }}
+      >
+        {t("chat.speechRetry")}
+      </button>
+    </div>
+  );
+}
+
 // Memoized: its props hold still while a reply streams or a tool runs, and the
 // chat around it re-renders through both.
 export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatInput({
@@ -736,7 +839,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   onAttachFiles,
   compact = false,
 }: Props, ref) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { fontSize } = useChatAppearance();
   const { ui: uiFontFamily, uiWeight } = useFontPreferences();
   const isMobile = useIsMobile();
@@ -784,6 +887,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const historyMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isComposingRef = useRef(false);
+  // Dictation finals that arrived mid-IME-composition; flushed on compositionEnd.
+  const pendingSpeechRef = useRef("");
   const lastCompositionEndAtRef = useRef(0);
   const pendingPasteRef = useRef<object | null>(null);
   const slashCommandsRequestedRef = useRef(false);
@@ -800,6 +905,40 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const pendingImageCountRef = useRef(0);
   valueRef.current = value;
   attachedImagesRef.current = attachedImages;
+
+  // Voice input: each finalized segment lands as one native textarea edit (one
+  // undo step, the pasteText path); interim text only feeds the status line.
+  const insertSpeechSegment = (segment: string) => {
+    const ta = textareaRef.current;
+    if (!ta) {
+      setValue((v) => v + (v ? " " : "") + segment);
+      return;
+    }
+    const caret = ta.selectionStart ?? ta.value.length;
+    const before = ta.value.slice(0, caret);
+    // No lookbehind in client code: test the boundary the forward way.
+    const sep = before && !/\s$/.test(before) ? " " : "";
+    replaceTextareaRange(ta, caret, ta.selectionEnd ?? caret, sep + segment);
+    setAtQuery(null);
+    requestAnimationFrame(() => {
+      autoGrowTextarea(ta);
+      scrollTextareaCaretIntoView(ta);
+    });
+  };
+  const speech = useSpeechInput({
+    lang: speechLangForLocale(locale),
+    onFinal: (segment) => {
+      // An IME composition owns the caret; hold the segment until it ends.
+      if (isComposingRef.current) {
+        pendingSpeechRef.current += (pendingSpeechRef.current ? " " : "") + segment;
+        return;
+      }
+      insertSpeechSegment(segment);
+    },
+  });
+  // Destructured so clearInput's dependency array can name a stable function
+  // (react-hooks/exhaustive-deps wants the whole object otherwise).
+  const { stop: stopSpeech } = speech;
 
   useImperativeHandle(ref, () => ({
     setText(text: string) {
@@ -1082,7 +1221,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-  }, [clearImages, draftKey]);
+    // The draft left (sent, queued, side chat, a handled built-in): stop the
+    // dictation so no late final lands in the fresh draft. An empty draft's
+    // send never reaches here, so tapping Send does not kill the listening.
+    stopSpeech();
+  }, [clearImages, draftKey, stopSpeech]);
 
   useEffect(() => {
     if (!draftKey || draftKeyRef.current !== draftKey) return;
@@ -2454,6 +2597,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               lastCompositionEndAtRef.current = Date.now();
               const el = e.currentTarget;
               updateAtQuery(el.value, el.selectionStart);
+              if (pendingSpeechRef.current) {
+                const pending = pendingSpeechRef.current;
+                pendingSpeechRef.current = "";
+                insertSpeechSegment(pending);
+              }
             }}
             onInput={handleInput}
             onPaste={handlePaste}
@@ -2484,6 +2632,15 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             }}
           />
 
+          {speech.supported && (
+            <SpeechMicButton
+              listening={speech.status === "listening"}
+              title={speech.status === "listening" ? t("chat.speechStop") : t("chat.speechDictate")}
+              ariaLabel={speech.status === "listening" ? t("chat.speechStop") : t("chat.speechDictate")}
+              isMobile={isMobile}
+              onClick={speech.toggle}
+            />
+          )}
           {isStreaming && !bashMode ? (
             <div style={{ display: "flex", alignItems: "stretch", gap: 6, flexShrink: 0, alignSelf: "flex-end" }}>
               {onSideChat && (
@@ -2599,6 +2756,15 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
              {t("chat.shell")} · {bashExcluded ? t("chat.outputLocal") : t("chat.outputModel")}
           </div>
         )}
+
+        {/* Dictation status line */}
+        <SpeechStatusLine
+          status={speech.status}
+          errorKind={speech.errorKind}
+          interim={speech.interim}
+          onRetry={speech.start}
+          t={t}
+        />
 
         {/* Bottom bar: left | center (context) | right */}
         {!compact && <div className="chat-input-controls" style={{
