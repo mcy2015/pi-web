@@ -6,6 +6,7 @@ import { renewShare, removeShares, summarizeShare } from "@/lib/share-store";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 import { listAllSessions, mergeSessionLists } from "@/lib/session-reader";
 import { SESSION_ID_PATTERN } from "@/lib/session-ui-state-shared";
+import { MAX_SHARE_REVOKE_IDS } from "@/lib/share-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -16,8 +17,6 @@ export const dynamic = "force-dynamic";
 // locked pass) and renew (move expiresAt without re-freezing the session).
 
 /** Most ids one revoke takes; the admin page sends bigger selections in parts. */
-export const MAX_SHARE_REVOKE_IDS = 500;
-
 const NO_STORE = { "Cache-Control": "no-store" };
 
 function refusal(status: number, error: string) {
@@ -31,7 +30,7 @@ export async function GET(req: Request) {
     const sessions = mergeSessionLists(
       await listAllSessions({ force: true }),
       getRpcSessionInfos({ includeTransient: true }),
-    );
+    ).filter((session) => !session.ephemeral);
     const existingIds = new Set(sessions.map((session) => session.id));
     return NextResponse.json({ shares: listSharesForAdmin(existingIds) }, { headers: NO_STORE });
   } catch (error) {

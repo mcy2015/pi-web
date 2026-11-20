@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isEphemeralRpcSession } from "@/lib/rpc-manager";
 import { parseShareDurationBody } from "@/lib/share-request";
 import { getShare, putShare, removeShare, summarizeShare } from "@/lib/share-store";
 import { buildShareSnapshot, ShareSnapshotError } from "@/lib/share-snapshot";
@@ -11,8 +12,18 @@ export const runtime = "nodejs";
 
 type Params = { params: Promise<{ id: string }> };
 
+// An ephemeral session is never shared: the snapshot would freeze its
+// memory-only conversation into the share store, on disk and outside the process.
+function ephemeralRefusal() {
+  return NextResponse.json(
+    { error: "Ephemeral sessions cannot be shared", code: "ephemeral" },
+    { status: 409 },
+  );
+}
+
 export async function GET(_req: Request, { params }: Params) {
   const { id } = await params;
+  if (isEphemeralRpcSession(id)) return ephemeralRefusal();
   try {
     const share = getShare(id);
     return NextResponse.json({ share: share ? summarizeShare(share) : null });
@@ -23,6 +34,7 @@ export async function GET(_req: Request, { params }: Params) {
 
 export async function POST(req: Request, { params }: Params) {
   const { id } = await params;
+  if (isEphemeralRpcSession(id)) return ephemeralRefusal();
   let body: unknown;
   try {
     body = await req.json();
@@ -48,6 +60,7 @@ export async function POST(req: Request, { params }: Params) {
 
 export async function DELETE(_req: Request, { params }: Params) {
   const { id } = await params;
+  if (isEphemeralRpcSession(id)) return ephemeralRefusal();
   try {
     // Deleting a share that is already gone is fine.
     const existed = await removeShare(id);

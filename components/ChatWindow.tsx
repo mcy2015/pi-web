@@ -319,6 +319,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     handleBuiltinSlashCommand,
     handleToolPresetChange, handleThinkingLevelChange, handleSetDefaultModel, handleSetDefaultThinkingLevel, loadSlashCommands, loadAllModels, scrollUserMsgToTop,
     loadContext, activeLeafId, scrollToBottom, scrollToMessage,
+    sessionEphemeral, newSessionEphemeral, handleNewSessionEphemeralChange,
   } = useAgentSession({
     session, sessionRunning, newSessionCwd, newSessionDraftKey, initialNewSessionChoices, onNewSessionChoicesChange, onAgentEnd: wrappedOnAgentEnd, onSessionEnded, onToolEnd, onAttentionNeeded, onSessionCreated, onSessionForked, onSideSession,
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsPanelOpen,
@@ -328,6 +329,22 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   // Only whether a reply is streaming and has content yet: the chunks themselves
   // re-render StreamingReply alone.
   const isStreaming = useStreamingSelector(streamingStore, selectIsStreaming);
+
+  // The banner's End: closing the wrapper is the whole disposal of an
+  // ephemeral session — there is no file to clean up afterwards.
+  const [endingEphemeralSession, setEndingEphemeralSession] = useState(false);
+  const endEphemeralSession = useCallback(async () => {
+    if (!session || endingEphemeralSession) return;
+    setEndingEphemeralSession(true);
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      onSessionEnded?.(session.id);
+    } catch (error) {
+      setEndingEphemeralSession(false);
+      addNotice({ type: "error", message: t("sidebar.deleteFailed", { error: error instanceof Error ? error.message : String(error) }) });
+    }
+  }, [session, endingEphemeralSession, onSessionEnded, addNotice, t]);
   const hasStreamingContent = useStreamingSelector(streamingStore, selectHasStreamingContent);
   const getStreamingMessage = useCallback(() => streamingStore.getState().streamingMessage, [streamingStore]);
   const sessionBusy = agentRunning || bashRunning;
@@ -976,7 +993,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       ref={chatInputRef}
       onSend={handleSend}
       onAbort={handleAbort}
-      onSideChat={onSideSession && !isHiddenRelation(session?.relation) ? askInSideChat : undefined}
+      onSideChat={onSideSession && !isHiddenRelation(session?.relation) && !sessionEphemeral ? askInSideChat : undefined}
       onSteer={agentRunning ? handleSteer : undefined}
       onFollowUp={agentRunning ? handleFollowUp : undefined}
       onPromptWithStreamingBehavior={agentRunning ? handlePromptWithStreamingBehavior : undefined}
@@ -1001,6 +1018,8 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       onDismissCompactError={dismissCompactError}
       compactResult={compactResult}
       toolPreset={toolPreset}
+      newSessionEphemeral={isNew ? newSessionEphemeral : undefined}
+      onNewSessionEphemeralChange={isNew ? handleNewSessionEphemeralChange : undefined}
       onToolPresetChange={(session && !isHiddenRelation(session.relation)) || isNew ? handleToolPresetChange : undefined}
       thinkingLevel={thinkingLevel}
       isAutoThinkingSelection={isAutoThinkingSelection}
@@ -1184,7 +1203,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                     onEnterSubagent={onEnterSubagent}
                     entryId={entryIds[idx]}
                     searchBlock={entryIds[idx] === pendingSearchScroll?.entryId ? searchBlock : undefined}
-                    onFork={bashRunning || isNew ? undefined : forkFromMessage}
+                    onFork={bashRunning || isNew || sessionEphemeral ? undefined : forkFromMessage}
                     forking={forkingEntryId === entryIds[idx]}
                     onEditContent={sessionBusy ? undefined : handleEditContent}
                     onCancelEdit={cancelEdit}
@@ -1564,6 +1583,45 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
               </div>
               {newSessionContextBar}
             </div>
+          </div>
+        )}
+        {sessionEphemeral && session && (
+          <div
+            className="ephemeral-banner"
+            title={t("ephemeral.bannerHint")}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "4px 12px",
+              borderTop: "1px solid var(--border)",
+              color: "var(--text-muted)",
+              fontSize: 12,
+            }}
+          >
+            <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flex: "0 0 auto" }}>
+              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+              <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+              <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
+              <line x1="1" y1="1" x2="23" y2="23" />
+            </svg>
+            <span style={{ flex: 1, minWidth: 0 }}>{t("ephemeral.banner")}</span>
+            <button
+              type="button"
+              disabled={endingEphemeralSession}
+              onClick={() => { void endEphemeralSession(); }}
+              style={{
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                background: "none",
+                color: "var(--text)",
+                padding: "2px 10px",
+                fontSize: 12,
+                cursor: endingEphemeralSession ? undefined : "pointer",
+              }}
+            >
+              {t("ephemeral.end")}
+            </button>
           </div>
         )}
         <TodoPanel snapshot={todoSnapshot} />

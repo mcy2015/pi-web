@@ -1931,7 +1931,7 @@ export function AppShell() {
       type="button"
       // On a narrow phone it sits outside the More menu, so it leaves that menu as it is.
       onClick={() => toggleTopPanel("agents", mobile && !isNarrowMobile)}
-      disabled={!activeSessionFamily}
+      disabled={!activeSessionFamily || activeSessionFamily.root.ephemeral === true}
       title={agentsButtonLabel}
       aria-label={agentsButtonLabel}
       aria-pressed={activeTopPanel === "agents"}
@@ -2801,7 +2801,7 @@ export function AppShell() {
               overflowY: "auto",
               zIndex: 500,
             }}>
-              {activeTopPanel === "agents" && activeSessionFamily && selectedSession && (
+              {activeTopPanel === "agents" && activeSessionFamily && activeSessionFamily.root.ephemeral !== true && selectedSession && (
                 <AgentSessionPanel
                   rootSession={activeSessionFamily.root}
                   subagents={activeSessionFamily.subagents}
@@ -3045,7 +3045,7 @@ export function AppShell() {
           )}
 
         </div>
-        {agentStripMembers && activeSessionFamily && selectedSession && activeTopPanel !== "agents" && (
+        {agentStripMembers && activeSessionFamily && activeSessionFamily.root.ephemeral !== true && selectedSession && activeTopPanel !== "agents" && (
           <AgentMiniStrip
             rootSession={activeSessionFamily.root}
             members={agentStripMembers}

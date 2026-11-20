@@ -634,6 +634,11 @@ const SessionRowView = memo(function SessionRowView({
           {branch}
         </span>
       )}
+      {root.ephemeral === true && (
+        <span className="session-tree-branch" title={t("ephemeral.badge")} aria-label={t("ephemeral.badge")} style={{ color: "var(--text-dim)" }}>
+          ◌
+        </span>
+      )}
       <span className={`session-tree-meta${metaState}`} title={metaTitle}>{meta}</span>
     </>
   );

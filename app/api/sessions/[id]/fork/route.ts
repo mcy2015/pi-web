@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getRpcSession } from "@/lib/rpc-manager";
+import { getRpcSession, isEphemeralRpcSession } from "@/lib/rpc-manager";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 import { sideChatNameFromText } from "@/lib/session-family";
 import { createSideSession, forkSessionBranch, readForkSourceTitle, SessionForkError } from "@/lib/session-fork";
@@ -39,6 +39,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!isApiRequestAllowed(req)) return refusal(403, "request-denied", "Untrusted API request");
   if (!hasJsonContentType(req)) return refusal(415, "request-denied", "Content-Type must be application/json");
   const { id } = await params;
+
+  // An ephemeral session has no file to copy, and a copy would persist its conversation.
+  if (isEphemeralRpcSession(id)) {
+    return refusal(409, "ephemeral", "Ephemeral sessions cannot be forked");
+  }
 
   try {
     const body = await req.json().catch(() => null) as { side?: unknown; name?: unknown } | null;

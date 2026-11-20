@@ -10,7 +10,8 @@ const jiti = createJiti(import.meta.url, {
   interopDefault: true,
   moduleCache: false,
 });
-const { GET, POST, MAX_SHARE_REVOKE_IDS } = await jiti.import("./route.ts");
+const { GET, POST } = await jiti.import("./route.ts");
+const { MAX_SHARE_REVOKE_IDS } = await jiti.import("../../../lib/share-admin.ts");
 const { invalidateSessionListCache } = await jiti.import("../../../lib/session-reader.ts");
 
 // The rejection paths never reach the store, so they run against plain

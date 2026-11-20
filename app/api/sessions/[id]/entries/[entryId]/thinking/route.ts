@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionEntries, resolveSessionPath } from "@/lib/session-reader";
+import { getRpcSession } from "@/lib/rpc-manager";
 
 export async function GET(
   req: Request,
@@ -13,11 +14,20 @@ export async function GET(
   }
 
   try {
-    const filePath = await resolveSessionPath(id);
-    if (!filePath) return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    // An ephemeral session lives only in its live wrapper's memory: read it
+    // there the way the context route does; the file exists only once persisted.
+    const rpc = getRpcSession(id);
+    const liveRpc = rpc?.isAlive() ? rpc : undefined;
+    const filePath = liveRpc ? null : await resolveSessionPath(id);
+    if (!liveRpc && !filePath) {
+      return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
 
     // SessionManager-backed parsing preserves the SDK's malformed-line tolerance.
-    const entry = getSessionEntries(filePath).find((candidate) => candidate.id === entryId);
+    const entries = liveRpc
+      ? liveRpc.inner.sessionManager.getEntries() as unknown as ReturnType<typeof getSessionEntries>
+      : getSessionEntries(filePath!);
+    const entry = entries.find((candidate) => candidate.id === entryId);
     if (!entry || entry.type !== "message" || entry.message.role !== "assistant") {
       return NextResponse.json({ error: "Assistant message not found" }, { status: 404 });
     }

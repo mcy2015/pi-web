@@ -393,6 +393,10 @@ export interface SessionInfo {
   /** True while the runtime session exists only in memory and its JSONL file
    *  has not been created yet. Disk-backed actions must wait until this clears. */
   transient?: boolean;
+  /** True only for an ephemeral session: kept in memory alone, never written
+   *  to disk, gone when its wrapper closes. Disk-backed and publishing
+   *  actions refuse it. */
+  ephemeral?: true;
 }
 
 export interface SessionContext {

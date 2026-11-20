@@ -15,7 +15,7 @@
 
 import { readdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
-import { abortSubagent, getRpcSession, getRpcSessionInfos, getRunningRpcSessionIds } from "./rpc-manager";
+import { abortSubagent, getRpcSession, getRpcSessionInfos, getRunningRpcSessionIds, isEphemeralRpcSession } from "./rpc-manager";
 import {
   invalidateSessionListCache,
   invalidateSessionManagerCache,
@@ -60,12 +60,18 @@ export async function deleteSessions(
 ): Promise<SessionDeleteResult> {
   const targets = new Map<string, string>();
   const missing: string[] = [];
+  // An ephemeral session has no file to delete: deleting it is closing its
+  // wrapper, whatever keepRunning says — its conversation is not resumable and
+  // the file never existed. No subagents or side chats can hang below it
+  // (both need a persisted parent), so it has no family to walk.
+  const ephemeralIds: string[] = [];
   for (const id of new Set(ids)) {
+    if (isEphemeralRpcSession(id)) { ephemeralIds.push(id); continue; }
     const filePath = await resolveSessionPath(id);
     if (filePath) targets.set(id, filePath);
     else missing.push(id);
   }
-  if (targets.size === 0) return { deleted: [], missing, running: [] };
+  if (targets.size === 0 && ephemeralIds.length === 0) return { deleted: [], missing, running: [] };
 
   // Read only the bounded headers before deleting.
   const parentPathByKey = new Map<string, string | undefined>();
@@ -254,6 +260,9 @@ export async function deleteSessions(
   } catch (error) {
     console.warn(`[pi-web] could not clear the sidebar state of deleted sessions: ${error instanceof Error ? error.message : String(error)}`);
   }
+  for (const ephemeralId of ephemeralIds) {
+    await getRpcSession(ephemeralId)?.shutdown();
+  }
   invalidateSessionListCache();
-  return { deleted: [...deletedSessionIds], missing, running };
+  return { deleted: [...deletedSessionIds, ...ephemeralIds], missing, running };
 }

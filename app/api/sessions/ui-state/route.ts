@@ -5,6 +5,7 @@ import {
   SessionUiStateLockedError,
   updateSessionUiState,
 } from "@/lib/session-ui-state";
+import { isEphemeralRpcSession } from "@/lib/rpc-manager";
 import {
   MAX_PROJECT_NAMES,
   PROJECT_NAMES_MAX_BYTES,
@@ -56,6 +57,20 @@ export async function POST(req: Request) {
   if (!parsed.ok) return refusal(400, "invalid-request", parsed.error);
 
   const { request } = parsed;
+  // An ephemeral session must not enter the persisted sidebar state: pins,
+  // archive and read times would record its id past the session's own life.
+  if (request.action === "set" || request.action === "read") {
+    request.ids = request.ids.filter((id) => !isEphemeralRpcSession(id));
+  } else if (request.action === "restore") {
+    request.entries = request.entries.filter((entry) => !isEphemeralRpcSession(entry.id));
+  }
+  const noSessionIdsLeft =
+    ((request.action === "set" || request.action === "read") && request.ids.length === 0)
+    || (request.action === "restore" && request.entries.length === 0);
+  if (noSessionIdsLeft) {
+    // Nothing of the request remains to write; answer with the state as it is.
+    return NextResponse.json({ state: readSessionUiState() } satisfies SessionUiStateResponse, { headers: NO_STORE });
+  }
   try {
     const state = await updateSessionUiState(request);
     // A name with no room left was not stored (nothing was written): say so,

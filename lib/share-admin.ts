@@ -6,6 +6,9 @@
 import { getSharesPath, isShareExpired, readShares } from "./share-store";
 import { inferShareDurationDays, type ShareDurationDays } from "./share-types";
 
+/** Most ids one revoke takes; the admin page sends bigger selections in parts. */
+export const MAX_SHARE_REVOKE_IDS = 500;
+
 export interface ShareAdminItem {
   sessionId: string;
   code: string;

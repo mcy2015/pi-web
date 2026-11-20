@@ -175,6 +175,8 @@ type WrapperMcpHost = Pick<McpHost, "prepareForPrompt" | "dispose"> & Partial<Pi
 type AgentSessionWrapperOptions = {
   exactSystemPrompt?: () => string;
   chatOnly?: boolean;
+  /** An ephemeral session: never persisted, never shared, reaped by its own idle fallback. */
+  ephemeral?: boolean;
   onAgentRunComplete?: AgentRunCompleteListener;
   suppressCompletionNotifications?: boolean;
   /** A subagent's wrapper: a run ended and nothing is left to do. */
@@ -232,6 +234,10 @@ const IDLE_RESET_EVENT_TYPES = new Set([
 ]);
 
 const DEFAULT_SESSION_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+
+/** An ephemeral session never stays forever: when idle shutdown is disabled (PI_WEB_IDLE_TIMEOUT_MS=0),
+ * it is still reaped after two hours. */
+const EPHEMERAL_SESSION_IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 
 /**
  * Resolves the PI_WEB_IDLE_TIMEOUT_MS environment variable into a session idle
@@ -302,6 +308,8 @@ export interface RpcSessionStartOptions {
   initialModel?: { provider: string; modelId: string };
   allowInitialModelFallback?: boolean;
   thinkingLevel?: ThinkingLevel;
+  /** An ephemeral session: an in-memory SessionManager, no file ever written, gone when it closes. */
+  ephemeral?: boolean;
 }
 
 const CODING_TOOL_NAMES = ["read", "bash", "powershell", "edit", "write", "grep", "find", "ls"];
@@ -399,7 +407,9 @@ export class AgentSessionWrapper {
   // get_state calls waiting for the binding, released early by a blocking dialog (waitForStateRead()).
   private blockingUiWaiters = new Set<() => void>();
   private readonly exactSystemPrompt?: () => string;
-  private readonly chatOnly: boolean;
+  private chatOnly: boolean;
+  /** True while this wrapper's conversation is memory-only: read by the routes that must refuse to persist any part of it. */
+  readonly ephemeral: boolean;
   private readonly onAgentRunComplete?: AgentRunCompleteListener;
   private readonly onDirectTurnSettled?: (aborted: boolean) => void;
   private readonly suppressCompletionNotifications: boolean;
@@ -456,6 +466,7 @@ export class AgentSessionWrapper {
   ) {
     this.exactSystemPrompt = options.exactSystemPrompt;
     this.chatOnly = options.chatOnly ?? false;
+    this.ephemeral = options.ephemeral ?? false;
     this.onAgentRunComplete = options.onAgentRunComplete;
     this.onDirectTurnSettled = options.onDirectTurnSettled;
     this.suppressCompletionNotifications = options.suppressCompletionNotifications ?? false;
@@ -1085,6 +1096,10 @@ export class AgentSessionWrapper {
   /** Apply a coding tool selection; `carry` defaults to the tools active now. */
   setActiveToolSelection(toolNames: string[], carry: readonly string[] = this.inner.getActiveToolNames()): void {
     this.inner.setActiveToolsByName(resolveActiveToolNames(this.inner, toolNames, carry));
+    // An ephemeral session applies tool changes in place (it never rebuilds),
+    // so the flag the in-place paths read (tree navigation's keep-selection
+    // skip, the chat-only model limits) must follow the new selection.
+    if (this.ephemeral) this.chatOnly = toolNames.length === 0;
   }
 
   /**
@@ -1198,9 +1213,11 @@ export class AgentSessionWrapper {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     // A resolved timeout of 0 disables idle shutdown, but a run that Stop could
     // not unwind is still reaped after the default delay; otherwise it stays
-    // running until the server restarts (#656).
+    // running until the server restarts (#656). An ephemeral session keeps a
+    // bounded lease of its own even then: it must never linger indefinitely.
     const timeoutMs = SESSION_IDLE_TIMEOUT_MS
-      || (this.forceShutdownOnIdle ? DEFAULT_SESSION_IDLE_TIMEOUT_MS : 0);
+      || (this.forceShutdownOnIdle ? DEFAULT_SESSION_IDLE_TIMEOUT_MS : 0)
+      || (this.ephemeral ? EPHEMERAL_SESSION_IDLE_TIMEOUT_MS : 0);
     this.forcedIdleTimerArmed = timeoutMs !== 0 && this.forceShutdownOnIdle;
     this.idleLastResetAt = Date.now();
     if (timeoutMs === 0) {
@@ -1584,6 +1601,7 @@ export class AgentSessionWrapper {
           // per-run changes again once the run ends.
           systemPrompt: this.exactSystemPrompt?.() ?? (this.inner.agent.state?.systemPrompt || this.inner.systemPrompt || ""),
           thinkingLevel: this.inner.agent.state?.thinkingLevel ?? "off",
+          ...(this.ephemeral ? { ephemeral: true } : {}),
           extensionStatuses: this.getExtensionStatuses(),
           extensionWidgets: this.getExtensionWidgets(),
         };
@@ -3035,6 +3053,19 @@ export function getRpcSession(sessionId: string): AgentSessionWrapper | undefine
 }
 
 /**
+ * True while `sessionId` names a live ephemeral wrapper: the state the routes
+ * that would persist or publish any part of a session (share, fork, export,
+ * auto-name, sidebar ui-state) check to refuse it. False once the wrapper
+ * closes — what is gone leaves nothing to protect.
+ */
+export function isEphemeralRpcSession(sessionId: string): boolean {
+  // Tolerant of the test registry's bare entries: only a live wrapper that
+  // carries the flag counts.
+  const session = getRpcSession(sessionId) as { isAlive?: () => boolean; ephemeral?: boolean } | undefined;
+  return session?.isAlive?.() === true && session.ephemeral === true;
+}
+
+/**
  * The sidebar's rename (#1388). A session a wrapper holds is renamed through
  * `AgentSession.setSessionName()`, as pi's `/name`, so the `session_info` entry hangs off the live
  * leaf and extensions get `session_info_changed`; appended to the file from outside, it was a dead
@@ -3118,6 +3149,14 @@ export async function setRpcSessionTools(
     throw new Error("Side chat tools are fixed when it is forked");
   }
 
+  // An ephemeral session never rebuilds: the shutdown+restart below would drop
+  // its in-memory conversation and the replacement would be a persisted one.
+  // Clearing to the default keeps the current tools; an explicit selection is
+  // applied in place, across the Chat-only boundary too.
+  if (existing.ephemeral && toolNames === undefined) {
+    return { session: existing, sessionId, recreated: false };
+  }
+
   const hasCurrentResourcePolicy = typeof existing.isChatOnly === "function"
     && typeof existing.setActiveToolSelection === "function";
   const crossesChatOnlyBoundary = toolNames === undefined
@@ -3127,7 +3166,7 @@ export async function setRpcSessionTools(
   else appendSessionToolSelection(existing.inner.sessionManager, toolNames);
   invalidateSessionListCache();
 
-  if (toolNames !== undefined && !crossesChatOnlyBoundary) {
+  if (toolNames !== undefined && (!crossesChatOnlyBoundary || existing.ephemeral)) {
     existing.setActiveToolSelection(toolNames);
     return { session: existing, sessionId, recreated: false };
   }
@@ -3215,6 +3254,7 @@ export function getRpcSessionInfos(options: { includeTransient?: boolean } = {})
     >;
     const messages = entries.filter((entry): entry is SessionMessageEntry => entry.type === "message");
     const firstUserMessage = messages.find((entry) => entry.message.role === "user");
+    const ephemeral = session.ephemeral === true;
     const sessionFile = manager.getSessionFile() ?? session.sessionFile;
     const persisted = Boolean(sessionFile && existsSync(sessionFile));
     const subagent = readSubagentRun(entries as unknown as SessionEntry[], header?.id ?? session.sessionId, sessionFile ?? "");
@@ -3222,7 +3262,10 @@ export function getRpcSessionInfos(options: { includeTransient?: boolean } = {})
 
     // An ensure_session call creates an idle, empty runtime while the composer
     // loads commands. Do not leak it into history before a prompt is accepted.
-    if (!persisted && !options.includeTransient && (!session.isRunning() || !firstUserMessage)) continue;
+    // An ephemeral session never writes a file, so its bar is only the first
+    // user message: after that it stays listed until it is deleted, running or not.
+    if (!persisted && !options.includeTransient
+      && (ephemeral ? !firstUserMessage : (!session.isRunning() || !firstUserMessage))) continue;
 
     const created = header?.timestamp
       ?? entries[0]?.timestamp
@@ -3257,6 +3300,7 @@ export function getRpcSessionInfos(options: { includeTransient?: boolean } = {})
         relation: { kind: "side" as const, ...side },
       } : {}),
       transient: !persisted,
+      ...(ephemeral ? { ephemeral: true } : {}),
     });
   }
   return sessions;
@@ -3478,7 +3522,11 @@ export async function startRpcSession(
     sessionManager = SessionManager.open(sessionFile, undefined);
   } else {
     if (!cwd) throw new Error("cwd is required for a new session");
-    sessionManager = SessionManager.create(cwd, undefined);
+    // An ephemeral session is memory-only for its whole life: no file is ever
+    // created, so nothing of it can outlive the wrapper.
+    sessionManager = options.ephemeral
+      ? SessionManager.inMemory(cwd)
+      : SessionManager.create(cwd, undefined);
   }
   const sessionCwd = sessionManager.getCwd();
   const sessionEntries = sessionManager.getEntries() as unknown as SessionEntry[];
@@ -3791,7 +3839,11 @@ export async function startRpcSession(
     const wrapper = new AgentSessionWrapper(inner, {
       exactSystemPrompt,
       chatOnly,
+      ephemeral: options.ephemeral === true,
       onAgentRunComplete: (completedSessionId, sessionName) => {
+        // An ephemeral session leaves no trace outside the process: no push
+        // notification, no title generated by sending its transcript to a provider.
+        if (options.ephemeral === true) return;
         void notifySessionComplete(completedSessionId, sessionName).catch((error) => {
           console.error("[pi-web] failed to send completion push:", error instanceof Error ? error.message : error);
         });

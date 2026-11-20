@@ -126,6 +126,8 @@ type AgentStateResponse = {
   isBashRunning?: boolean;
   isCompacting?: boolean;
   autoCompactionEnabled?: boolean;
+  /** A literal true on an ephemeral session: memory-only, gone when it closes. */
+  ephemeral?: true;
   extensionStatuses?: ExtensionStatusItem[];
   extensionWidgets?: ExtensionWidgetItem[];
   queuedMessages?: { steering?: string[]; followUp?: string[] } | null;
@@ -512,6 +514,21 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [currentModelOverride, setCurrentModelOverride] = useState<{ provider: string; modelId: string } | null>(null);
   const [liveModel, setLiveModel] = useState<{ provider: string; modelId: string } | null>(null);
   const [pendingModel, setPendingModel] = useState<{ provider: string; modelId: string } | null>(null);
+  // A fresh composer's privacy pick: the session its first prompt creates is
+  // ephemeral — memory-only, never written to disk. The ref mirrors the state
+  // so ensureNewSession reads the latest pick without rebuilding its callback
+  // (the pattern of newSessionModelOverrideRef above).
+  const [newSessionEphemeral, setNewSessionEphemeral] = useState(false);
+  const newSessionEphemeralRef = useRef(false);
+  // The pick the session was created with, frozen at ensure time: the provisional
+  // catalog row and the banner must never claim a privacy the session does not
+  // have (slash commands, the system panel or a `!` can ensure the session
+  // before the first prompt, while the toggle still reads differently).
+  const createdEphemeralRef = useRef(false);
+  // True while the session in view is ephemeral: set from the fresh composer's
+  // pick when it creates one, from get_state otherwise (an ephemeral session
+  // stays ephemeral for life, so any state read settles it).
+  const [sessionEphemeral, setSessionEphemeral] = useState(false);
   const [modelSwitching, setModelSwitching] = useState(false);
   const [isCompacting, setIsCompacting] = useState(false);
   const [autoCompactionEnabled, setAutoCompactionEnabled] = useState(true);
@@ -711,6 +728,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     if (state?.thinkingLevel !== undefined) {
       setLiveThinkingLevel(asConcreteThinkingLevel(state.thinkingLevel));
     }
+  }, []);
+
+  // The fresh composer's privacy toggle: only before its first prompt creates
+  // the session — an existing session's ephemeral flag never changes, so a
+  // session ensured early (slash commands, the system panel, a `!`) keeps the
+  // pick it was created with and later toggles do nothing.
+  const handleNewSessionEphemeralChange = useCallback((ephemeral: boolean) => {
+    if (sessionIdRef.current) return;
+    newSessionEphemeralRef.current = ephemeral;
+    setNewSessionEphemeral(ephemeral);
   }, []);
 
   const resolveComposerDraftKey = useCallback((key: string | undefined) => {
@@ -961,6 +988,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         syncLiveModel(liveState);
         if (liveState) {
           applyLiveUsage(liveState, sid, runId, usageRequestId);
+          setSessionEphemeral(liveState.ephemeral === true);
           if (liveState.systemPrompt !== undefined) setSystemPrompt(liveState.systemPrompt ?? null);
           if (liveState.extensionStatuses !== undefined) setExtensionStatuses(liveState.extensionStatuses ?? []);
           if (liveState.extensionWidgets !== undefined) setExtensionWidgets(liveState.extensionWidgets ?? []);
@@ -1066,6 +1094,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       messageCount,
       firstMessage,
       transient: true,
+      ...(createdEphemeralRef.current ? { ephemeral: true } : {}),
     }, provisionalDraftKey);
   }, [isNew, newSessionCwd, newSessionDraftKey, onSessionCreated, opts.chatInputRef]);
 
@@ -1114,6 +1143,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           ...(selectedThinkingLevel
             ? { thinkingLevel: selectedThinkingLevel }
             : {}),
+          ...(newSessionEphemeralRef.current ? { ephemeral: true } : {}),
         }),
       });
       if (!res.ok) {
@@ -1131,6 +1161,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       };
       const realId = result.sessionId;
       sessionIdRef.current = realId;
+      createdEphemeralRef.current = newSessionEphemeralRef.current;
+      if (createdEphemeralRef.current) setSessionEphemeral(true);
       applyNewSessionStartState(result, selectedModel, selectedThinkingLevel);
       return realId;
     })();
@@ -3277,6 +3309,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
     }
     if (agentState?.state) {
+      setSessionEphemeral(agentState.state.ephemeral === true);
       if (agentState.state.isCompacting !== undefined) setIsCompacting(agentState.state.isCompacting);
       if (agentState.state.systemPrompt !== undefined) setSystemPrompt(agentState.state.systemPrompt ?? null);
       if (agentState.state.extensionStatuses !== undefined) setExtensionStatuses(agentState.state.extensionStatuses ?? []);
@@ -3626,6 +3659,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     savedDefaultThinkingLevel,
     agentPhase,
     isNew,
+    // The ephemeral session in view (the toggle's pick once it created one),
+    // and the fresh composer's toggle itself with its setter.
+    sessionEphemeral: sessionEphemeral || session?.ephemeral === true,
+    newSessionEphemeral,
+    handleNewSessionEphemeralChange,
     editEntryId,
     promptAnchorActive,
     showScrollToBottom,

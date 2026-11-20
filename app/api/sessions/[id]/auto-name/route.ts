@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { generateSessionTitle } from "@/lib/session-title";
-import { getRpcSession, startRpcSession } from "@/lib/rpc-manager";
+import { getRpcSession, isEphemeralRpcSession, startRpcSession } from "@/lib/rpc-manager";
 import { invalidateSessionListCache, resolveSessionPath } from "@/lib/session-reader";
 
 export async function POST(
@@ -9,6 +9,11 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+
+  // Auto-naming sends the conversation to a provider; an ephemeral session's transcript never leaves.
+  if (isEphemeralRpcSession(id)) {
+    return NextResponse.json({ error: "Ephemeral sessions cannot be named by the model", code: "ephemeral" }, { status: 409 });
+  }
 
   try {
     const filePath = await resolveSessionPath(id);

@@ -6,6 +6,7 @@ import { basename, dirname, join } from "path";
 import { promisify } from "util";
 import { fileURLToPath, pathToFileURL } from "url";
 import { NextResponse } from "next/server";
+import { isEphemeralRpcSession } from "@/lib/rpc-manager";
 import { resolveSessionPath } from "@/lib/session-reader";
 
 const execFileAsync = promisify(execFile);
@@ -108,6 +109,11 @@ export async function GET(
 ) {
   const { id } = await params;
   const inline = new URL(req.url).searchParams.get("inline") === "1";
+
+  // An ephemeral session has no file to export, and the export would persist its conversation.
+  if (isEphemeralRpcSession(id)) {
+    return NextResponse.json({ error: "Ephemeral sessions cannot be exported", code: "ephemeral" }, { status: 409 });
+  }
 
   try {
     const filePath = await resolveSessionPath(id);
