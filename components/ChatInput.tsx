@@ -88,6 +88,10 @@ interface Props {
   /** The fresh composer's privacy pick: the session its first prompt creates is memory-only. */
   newSessionEphemeral?: boolean;
   onNewSessionEphemeralChange?: (ephemeral: boolean) => void;
+  /** The session in view is ephemeral: a lit marker in the tool row (fresh composers show the toggle instead). */
+  liveSessionEphemeral?: boolean;
+  /** Disposes of the ephemeral session in view. */
+  onEndEphemeralSession?: () => void;
   thinkingLevel?: "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   /** New session has not committed a thinking level; the button still shows the resolved default. */
   isAutoThinkingSelection?: boolean;
@@ -828,7 +832,7 @@ export function SpeechStatusLine({ status, errorKind, interim, onRetry, t }: {
 export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatInput({
   onSend, onAbort, onSteer, onSideChat, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, missingCwd, modelScopeWarnings, allModelList, onLoadAllModels, onModelChange, modelSwitching,
   defaultModel, onSetDefaultModel,
-  onCompact, onAbortCompaction, isCompacting, compactError, onDismissCompactError, compactResult, toolPreset, onToolPresetChange, newSessionEphemeral, onNewSessionEphemeralChange,
+  onCompact, onAbortCompaction, isCompacting, compactError, onDismissCompactError, compactResult, toolPreset, onToolPresetChange, newSessionEphemeral, onNewSessionEphemeralChange, liveSessionEphemeral, onEndEphemeralSession,
   thinkingLevel, isAutoThinkingSelection = false, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
   savedDefaultThinkingLevel, onSetDefaultThinkingLevel,
   retryInfo, queuedMessages, inputHistory = [], onRecallQueue,
@@ -2857,6 +2861,63 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
                   <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
                   <line x1="1" y1="1" x2="23" y2="23" />
+                </svg>
+              </button>
+            )}
+            {liveSessionEphemeral && (
+              <span
+                title={t("ephemeral.bannerHint")}
+                aria-label={t("ephemeral.badge")}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  width: isMobile ? 30 : 26,
+                  height: isMobile ? 30 : 26,
+                  color: "var(--accent)",
+                }}
+              >
+                <svg width={isMobile ? 18 : 15} height={isMobile ? 18 : 15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                  <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                  <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
+                  <line x1="1" y1="1" x2="23" y2="23" />
+                </svg>
+              </span>
+            )}
+            {liveSessionEphemeral && onEndEphemeralSession && (
+              <button
+                type="button"
+                onClick={onEndEphemeralSession}
+                title={t("ephemeral.endHint")}
+                aria-label={t("ephemeral.end")}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  width: isMobile ? 30 : 26,
+                  height: isMobile ? 30 : 26,
+                  border: "none",
+                  borderRadius: 6,
+                  background: "none",
+                  color: "var(--text-muted)",
+                  cursor: "pointer",
+                  transition: "background 0.12s, color 0.12s",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "var(--bg-hover)";
+                  e.currentTarget.style.color = "var(--text)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "none";
+                  e.currentTarget.style.color = "var(--text-muted)";
+                }}
+              >
+                <svg width={isMobile ? 18 : 15} height={isMobile ? 18 : 15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 2v10" />
+                  <path d="M18.4 6.6a9 9 0 1 1-12.77.04" />
                 </svg>
               </button>
             )}

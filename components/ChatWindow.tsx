@@ -1020,6 +1020,8 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       toolPreset={toolPreset}
       newSessionEphemeral={isNew ? newSessionEphemeral : undefined}
       onNewSessionEphemeralChange={isNew ? handleNewSessionEphemeralChange : undefined}
+      liveSessionEphemeral={isNew ? undefined : sessionEphemeral === true}
+      onEndEphemeralSession={() => { void endEphemeralSession(); }}
       onToolPresetChange={(session && !isHiddenRelation(session.relation)) || isNew ? handleToolPresetChange : undefined}
       thinkingLevel={thinkingLevel}
       isAutoThinkingSelection={isAutoThinkingSelection}
@@ -1583,45 +1585,6 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
               </div>
               {newSessionContextBar}
             </div>
-          </div>
-        )}
-        {sessionEphemeral && session && (
-          <div
-            className="ephemeral-banner"
-            title={t("ephemeral.bannerHint")}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "4px 12px",
-              borderTop: "1px solid var(--border)",
-              color: "var(--text-muted)",
-              fontSize: 12,
-            }}
-          >
-            <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flex: "0 0 auto" }}>
-              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-              <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
-              <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
-              <line x1="1" y1="1" x2="23" y2="23" />
-            </svg>
-            <span style={{ flex: 1, minWidth: 0 }}>{t("ephemeral.banner")}</span>
-            <button
-              type="button"
-              disabled={endingEphemeralSession}
-              onClick={() => { void endEphemeralSession(); }}
-              style={{
-                border: "1px solid var(--border)",
-                borderRadius: 6,
-                background: "none",
-                color: "var(--text)",
-                padding: "2px 10px",
-                fontSize: 12,
-                cursor: endingEphemeralSession ? undefined : "pointer",
-              }}
-            >
-              {t("ephemeral.end")}
-            </button>
           </div>
         )}
         <TodoPanel snapshot={todoSnapshot} />
