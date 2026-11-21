@@ -14,6 +14,7 @@ import {
   parseGitPorcelainV1,
   type GitPorcelainEntry,
 } from "./git-status";
+import { projectGitEnvironment } from "./git-environment";
 import { resolveExistingPath } from "./paths";
 
 const execFileAsync = promisify(execFile);
@@ -24,7 +25,7 @@ async function git(cwd: string, args: string[], maxBuffer = GIT_STATUS_MAX_BUFFE
   const { stdout } = await execFileAsync("git", ["-C", cwd, ...args], {
     timeout: GIT_TIMEOUT_MS,
     maxBuffer,
-    env: { ...process.env, LC_ALL: "C" },
+    env: projectGitEnvironment(),
   });
   return stdout;
 }

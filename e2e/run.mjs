@@ -26,6 +26,7 @@ import { checkWrittenFiles } from "./written-files.mjs";
 import { checkTodoPanel, createTodoPanelFixtures } from "./todo-panel.mjs";
 import { checkProjectNavigation, createProjectNavigationFixtures } from "./project-navigation.mjs";
 import { checkDirectoryPicker, createDirectoryPickerFixtures } from "./directory-picker.mjs";
+import { checkMissingCwdFork, createMissingCwdForkFixtures } from "./missing-cwd-fork.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const mode = process.env.E2E_SERVER_MODE || "dev";
@@ -257,6 +258,7 @@ try {
   const projectNavigation = createProjectNavigationFixtures({ agentDir, sessionDir, timestamp });
   const todoPanel = createTodoPanelFixtures({ sessionDir, project, timestamp });
   const directoryPicker = createDirectoryPickerFixtures(agentDir);
+  const missingCwdFork = createMissingCwdForkFixtures({ agentDir, sessionDir, timestamp });
 
   const probe = createServer();
   probe.listen(0, "127.0.0.1");
@@ -280,6 +282,11 @@ try {
     return response.json();
   }
 
+  async function deleteSession(id) {
+    const response = await fetch(`${base}/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE", signal: AbortSignal.timeout(30_000) });
+    assert.ok(response.ok, `DELETE session ${id} -> ${response.status}`);
+  }
+
   async function post(path, body) {
     const response = await fetch(`${base}${path}`, {
       method: "POST",
@@ -298,7 +305,7 @@ try {
     const response = await fetch(`${base}/api/sessions`, { signal: AbortSignal.timeout(5000) }).catch(() => null);
     if (response?.ok) {
       const { sessions } = await response.json();
-      assert.deepEqual(sessions.map((session) => session.id).sort(), [LONG, BRANCH, RICH, COMPACTED, APPEND, CODE_BACKGROUND, SUBAGENT_PARENT, SUBAGENT_CHILD, WRITTEN, WRITTEN_CHILD, projectNavigation.id, todoPanel.id].sort());
+      assert.deepEqual(sessions.map((session) => session.id).sort(), [LONG, BRANCH, RICH, COMPACTED, APPEND, CODE_BACKGROUND, SUBAGENT_PARENT, SUBAGENT_CHILD, WRITTEN, WRITTEN_CHILD, projectNavigation.id, todoPanel.id, missingCwdFork.id].sort());
       break;
     }
     assert.ok(Date.now() < deadline, "Server readiness timed out; see server.log");
@@ -432,7 +439,16 @@ try {
     assert.deepEqual(rendered.filter((value) => value !== text(0)),
       Array.from({ length: 5000 - oldest }, (_, i) => text(oldest + i)), "Missing, reordered, or duplicate chat messages");
     if (viewport.width > 600) {
-      assert.deepEqual(await readMinimapTurn("minimap-turns-paged.png"), {
+      // The minimap lists the turns again a moment after a page lands (its
+      // measure is throttled), while `turnsBefore` changes with the page: read
+      // too soon, the last page's turns are numbered from the new count.
+      let paged;
+      for (let attempt = 0; attempt < 20; attempt++) {
+        paged = await readMinimapTurn("minimap-turns-paged.png");
+        if (paged.number === "2500") break;
+        await page.waitForTimeout(100);
+      }
+      assert.deepEqual(paged, {
         number: "2500",
         earlier: `Earlier turns not loaded: ${oldest / 2}. Click to load`,
       }, "Loading older pages must not renumber minimap turns");
@@ -642,10 +658,7 @@ try {
     a: { id: BRANCH, entry: "new", text: "Active branch answer" },
     b: { id: CODE_BACKGROUND, entry: "answer", text: "const x = 1;" },
     api,
-    deleteSession: async (id) => {
-      const response = await fetch(`${base}/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE", signal: AbortSignal.timeout(30_000) });
-      assert.ok(response.ok, `DELETE session ${id} -> ${response.status}`);
-    },
+    deleteSession,
   });
   await checkProjectNavigation({ browser, base, artifacts, fixture: projectNavigation, otherSessionId: BRANCH, api, post });
   // Last of all in its own context: the Agent card's subagent entries.
@@ -653,6 +666,7 @@ try {
   await checkWrittenFiles({ browser, base, artifacts, session: WRITTEN });
   await checkTodoPanel({ browser, base, artifacts, session: todoPanel.id });
   await checkDirectoryPicker({ browser, base, fixture: directoryPicker });
+  await checkMissingCwdFork({ browser, base, artifacts, fixture: missingCwdFork, api, deleteSession });
 } catch (error) {
   console.error(error);
   process.exitCode = 1;

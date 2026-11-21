@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from "url";
 import { NextResponse } from "next/server";
 import { isEphemeralRpcSession } from "@/lib/rpc-manager";
 import { resolveSessionPath } from "@/lib/session-reader";
+import { contentDisposition } from "@/lib/content-disposition";
 
 const execFileAsync = promisify(execFile);
 
@@ -28,18 +29,6 @@ async function getPiPackageDir(): Promise<string | null> {
   } catch {
     return null;
   }
-}
-
-function encodeHeaderValue(value: string): string {
-  return encodeURIComponent(value).replace(/[!'()*]/g, (ch) =>
-    `%${ch.charCodeAt(0).toString(16).toUpperCase()}`
-  );
-}
-
-function getContentDisposition(fileName: string, inline: boolean): string {
-  const fallback = fileName.replace(/[^\x20-\x7E]|["\\;\r\n]/g, "_") || "session.html";
-  const disposition = inline ? "inline" : "attachment";
-  return `${disposition}; filename="${fallback}"; filename*=UTF-8''${encodeHeaderValue(fileName)}`;
 }
 
 async function getPiCliPath(): Promise<string | null> {
@@ -99,7 +88,11 @@ async function exportSession(filePath: string, outputPath: string): Promise<void
   if (!packageDir) throw new Error("pi CLI not found");
 
   const exporterUrl = pathToFileURL(join(packageDir, "dist", "core", "export-html", "index.js")).href;
-  const { exportFromFile } = (await import(exporterUrl)) as ExportHtmlModule;
+  // The specifier is a runtime file URL, so webpack cannot analyze it and warns
+  // "Critical dependency: the request of a dependency is an expression" (a
+  // static context module that could never match). The target always exists on
+  // disk at run time, so keep this import native for Node instead of bundling.
+  const { exportFromFile } = (await import(/* webpackIgnore: true */ exporterUrl)) as ExportHtmlModule;
   await exportFromFile(filePath, outputPath);
 }
 
@@ -136,7 +129,7 @@ export async function GET(
       return new Response(html, {
         headers: {
           "Content-Type": "text/html; charset=utf-8",
-          "Content-Disposition": getContentDisposition(fileName, inline),
+          "Content-Disposition": contentDisposition(inline ? "inline" : "attachment", fileName, "session.html"),
           "Cache-Control": "no-cache",
           "Content-Security-Policy": "frame-ancestors 'none'",
           "X-Content-Type-Options": "nosniff",
