@@ -1366,7 +1366,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         <QuoteSelectionPopover
           rootRef={messageContentRef}
           chatInputRef={chatInputRef}
-          startSideChat={onSideSession && !isHiddenRelation(session?.relation) ? startSideChat : undefined}
+          startSideChat={onSideSession && !isHiddenRelation(session?.relation) && !sessionEphemeral ? startSideChat : undefined}
         />
       )}
 
