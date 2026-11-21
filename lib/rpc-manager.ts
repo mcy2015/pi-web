@@ -1,5 +1,5 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, SettingsManager, Theme, type ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, SettingsManager, Theme, type LoadExtensionsResult, type ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
 import { existsSync, realpathSync, writeFileSync } from "fs";
@@ -238,6 +238,20 @@ const DEFAULT_SESSION_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 /** An ephemeral session never stays forever: when idle shutdown is disabled (PI_WEB_IDLE_TIMEOUT_MS=0),
  * it is still reaped after two hours. */
 const EPHEMERAL_SESSION_IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+
+/** An ephemeral session must not record anything, so it never loads the memory
+ * extension: its tools (memory_write, scratchpad, …) would persist conversation
+ * content, and its session_shutdown handler summarizes the whole conversation
+ * into the daily log. Matched on the package's directory segment so the drop
+ * follows the package wherever it is installed. */
+export function withoutMemoryRecordingExtensions(base: LoadExtensionsResult): LoadExtensionsResult {
+  return {
+    ...base,
+    extensions: base.extensions.filter(
+      (extension) => !/(^|\/)pi-memory\//.test(extension.resolvedPath),
+    ),
+  };
+}
 
 /**
  * Resolves the PI_WEB_IDLE_TIMEOUT_MS environment variable into a session idle
@@ -3678,7 +3692,9 @@ export async function startRpcSession(
             ],
             extensionsOverride: (base) => preferPiWebTodoExtension(
               preferUserPowerShellExtension(
-                preferUserBashExtension(preferPiWebSubagentExtension(base)),
+                preferUserBashExtension(preferPiWebSubagentExtension(
+                  options.ephemeral === true ? withoutMemoryRecordingExtensions(base) : base,
+                )),
               ),
             ),
           },
