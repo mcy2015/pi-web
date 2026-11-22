@@ -45,13 +45,19 @@ branch="$(git rev-parse --abbrev-ref HEAD)"
 note "branch=$branch  version=$(version)"
 
 # ------------------------------------------------- step 1: bump + tag (idempotent)
+# The registry's latest is the source of truth for "was the previous release
+# published":  latest == version  → previous release shipped, bump a new one;
+#               latest  < version  → bumped but not yet published, keep it.
+# (A HEAD-tag check would re-bump whenever any commit lands after a Release.)
 step "[1/8] version bump"
-head_tag="$(git describe --tags --exact-match HEAD 2>/dev/null || true)"
-if [ "$head_tag" = "v$(version)" ]; then
-  note "HEAD already tagged $head_tag — bump done earlier, skipping."
-else
-  npm run release
-fi
+registry_latest="$(npm view "$PKG" version 2>/dev/null || true)"
+[ -n "$registry_latest" ] || die "cannot read $PKG's latest version from the npm registry — network/npm state unclear, refusing to bump."
+relation="$(node -p "require('semver').compare('$registry_latest','$(version)')")"
+case "$relation" in
+  -1) note "v$(version) already bumped (registry latest: $registry_latest) — skipping." ;;
+  0)  npm run release ;;
+  *)  die "registry latest ($registry_latest) is newer than local v$(version) — refusing to bump." ;;
+esac
 
 # --------------------------------------------------------- step 2: push (idempotent)
 step "[2/8] push commit + tags"
