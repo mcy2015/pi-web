@@ -176,6 +176,42 @@ export function resolveLocalFileHref(
   return filePath;
 }
 
+/** A run of source lines a link points at (`#L12-L15`, `path:12-15`). */
+export interface FileLineRange {
+  startLine: number;
+  endLine: number;
+}
+
+/** The markdown-link callback: opens a local file, optionally at a PDF page and/or source lines. */
+export type OpenFileHandler = (filePath: string, page?: number, lines?: FileLineRange) => void;
+
+const LINE_FRAGMENT = /^L(\d+)(?:-L?(\d+))?$/i;
+const LINE_SUFFIX = /:(\d+)(?:(?::|-)(\d+))?$/;
+
+function toLineRange(startText: string, endText: string | undefined): FileLineRange | null {
+  const startLine = Number.parseInt(startText, 10);
+  const endLine = endText ? Number.parseInt(endText, 10) : startLine;
+  return startLine > 0 && endLine >= startLine ? { startLine, endLine } : null;
+}
+
+/**
+ * Read a source-line selector from a markdown href: `#L12`, `#L12-L15`,
+ * `#L12-15` (GitHub style), or a trailing `:12`, `:12-15`, `:12:15` (POSIX
+ * `file:line` style — the suffix `stripLineSuffix` drops from the path).
+ * Returns null when the href names no usable lines.
+ */
+export function parseFileLineFragment(href: string | undefined): FileLineRange | null {
+  if (!href) return null;
+  const hashIndex = href.indexOf("#");
+  if (hashIndex !== -1) {
+    const match = href.slice(hashIndex + 1).trim().match(LINE_FRAGMENT);
+    if (match) return toLineRange(match[1], match[2]);
+  }
+  const pathPart = (hashIndex === -1 ? href : href.slice(0, hashIndex)).trim();
+  const suffix = pathPart.match(LINE_SUFFIX);
+  return suffix ? toLineRange(suffix[1], suffix[2]) : null;
+}
+
 const PDF_PAGE_FRAGMENT = /^page=(\d+)$/i;
 
 /**

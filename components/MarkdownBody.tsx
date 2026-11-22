@@ -4,7 +4,7 @@ import { createContext, Fragment, memo, useContext, useMemo, useState, type Comp
 import ReactMarkdown, { type Components, type ExtraProps } from "react-markdown";
 import { useI18n } from "@/hooks/useI18n";
 import { copyText } from "@/lib/clipboard";
-import { parsePdfPageFragment, resolveLocalFileHref, shouldOpenLocalFileInApp } from "@/lib/file-links";
+import { parseFileLineFragment, parsePdfPageFragment, resolveLocalFileHref, shouldOpenLocalFileInApp, type OpenFileHandler } from "@/lib/file-links";
 import { encodeFilePathForApi } from "@/lib/file-paths";
 import { isAudioPath, isVideoPath } from "@/lib/file-types";
 import { isExternalMarkdownHref, jumpToMarkdownFragment, markdownAppUrlTransform, markdownDocumentRehypePlugins, markdownRehypePlugins, markdownRemarkPlugins, markdownTextLayoutRemarkPlugins, markdownUrlTransform, markdownUserRemarkPlugins, normalizeDisplayMath } from "@/lib/markdown";
@@ -22,7 +22,7 @@ interface MarkdownBodyProps {
   className?: string;
   isStreaming?: boolean;
   cwd?: string;
-  onOpenFile?: (filePath: string, page?: number) => void;
+  onOpenFile?: OpenFileHandler;
   /** A document reader's own links: relative paths and `#headings` stay in the reader. */
   onNavigateLink?: (href: string) => void;
   /** Text the user typed: every line ending is a line break and raw HTML shows as text, as in pi's TUI. */
@@ -190,7 +190,7 @@ export const MarkdownBody = memo(function MarkdownBody({ children, className, is
         const target = event.currentTarget.getAttribute("target");
         if (target && target !== "_self") return;
         event.preventDefault();
-        openFile(filePath, parsePdfPageFragment(href) ?? undefined);
+        openFile(filePath, parsePdfPageFragment(href) ?? undefined, parseFileLineFragment(href) ?? undefined);
       };
 
       return (

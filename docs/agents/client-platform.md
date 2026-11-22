@@ -34,6 +34,7 @@
 
 ## Global shortcuts (`hooks/useKeyboardShortcuts.ts`)
 - Ctrl+Alt+N starts a new session in the active project's cwd; `isNewSessionShortcut()` is the one place that decides. The letter (`event.key`) matches, so the shortcut follows the layout. The physical key (`code === "KeyN"`) matches only when `key === "Dead"`: macOS treats Option as a character-input modifier, so `Option+N` is a dead key (`˜`) in the U.S., ABC and British layouts and Chrome reports `key === "Dead"` with `ctrlKey`/`altKey` intact, which a letter-only match never fired on (#1335). Never match `code` alone: Windows reports AltGr as Ctrl+Alt, and where AltGr+N types a character (Polish `ń`) that keydown is the user's text, which `preventDefault()` would swallow.
+- Ctrl+Alt+M toggles dictation, but only inside the composer's focused textarea (`isDictateShortcut()`, checked in ChatInput's `handleKeyDown` after the IME guard): the mic button's keyboard twin, deliberately not a window listener — a side chat mounts a second ChatInput, and a global handler would toggle both. Same family and platform caveats as Ctrl+Alt+N; the mic button's tooltip names the key.
 - Esc stops the running agent unless the event is already `defaultPrevented` (a nearer Settings, menu or viewer closed on it) or the focus is a `TEXTAREA`/`INPUT`, which ChatInput owns. See [mcp-settings.md](mcp-settings.md) for the Escape stacking that depends on this.
 
 ## Opening the browser at startup (`bin/pi-web.js`, `bin/browser-opener.js`)

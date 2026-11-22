@@ -24,6 +24,7 @@ import {
   type AtQueryMatch, type FileIndexEntry,
 } from "@/lib/file-fuzzy";
 import { getMarkdownListContinuation } from "@/lib/markdown-list-continuation";
+import { isDictateShortcut } from "@/hooks/useKeyboardShortcuts";
 import { quoteSeparator } from "@/lib/quoted-selection";
 import { isBareMcpCommand, isBuiltinMcpCommand } from "@/lib/mcp-command";
 import { FolderIcon, getFileIcon } from "./FileIcons";
@@ -974,7 +975,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   });
   // Destructured so clearInput's dependency array can name a stable function
   // (react-hooks/exhaustive-deps wants the whole object otherwise).
-  const { stop: stopSpeech } = speech;
+  // Destructured so dependency arrays can name stable members (the linter
+  // wants the whole object otherwise, as the clearInput note above says).
+  const { supported: speechSupported, toggle: toggleSpeech, stop: stopSpeech } = speech;
 
   useImperativeHandle(ref, () => ({
     setText(text: string) {
@@ -1712,6 +1715,14 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         return;
       }
 
+      // Ctrl+Alt+M toggles dictation wherever the caret is. Checked after the
+      // IME guard: a composition session never yields this combination.
+      if (!isComposing && isDictateShortcut(e) && speechSupported) {
+        e.preventDefault();
+        toggleSpeech();
+        return;
+      }
+
       if (historyMenuOpen && !extensionUiOpen && !isComposing) {
         if (e.key === "ArrowDown") {
           e.preventDefault();
@@ -1829,7 +1840,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         }
       }
     },
-    [isMobile, enterSendMode, isStreaming, onSteer, onFollowUp, onAbort, extensionUiOpen, slashMenuOpen, slashQuery, displayedSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
+    [isMobile, enterSendMode, isStreaming, onSteer, onFollowUp, onAbort, extensionUiOpen, slashMenuOpen, slashQuery, displayedSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value, speechSupported, toggleSpeech]
   );
 
   const handleInput = useCallback(() => {
@@ -2675,7 +2686,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
           {speech.supported && (
             <SpeechMicButton
               listening={speech.status === "listening"}
-              title={speech.status === "listening" ? t("chat.speechStop") : t("chat.speechDictate")}
+              title={`${speech.status === "listening" ? t("chat.speechStop") : t("chat.speechDictate")} (Ctrl+Alt+M)`}
               ariaLabel={speech.status === "listening" ? t("chat.speechStop") : t("chat.speechDictate")}
               isMobile={isMobile}
               onClick={speech.toggle}

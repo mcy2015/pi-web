@@ -1,3 +1,4 @@
+import type { FileLineRange } from "@/lib/file-links";
 import type { FileViewerState } from "@/lib/file-viewer-state";
 import type { Tab } from "./TabBar";
 
@@ -35,6 +36,7 @@ interface OpenFileTabInput {
   filePath: string;
   modeHint?: "diff";
   page?: number;
+  lines?: FileLineRange;
   sourceSessionId?: string | null;
   tabId: string;
 }
@@ -49,6 +51,7 @@ export function openFileTab(tabs: Tab[], input: OpenFileTabInput): Tab[] {
       sourceSessionId: input.sourceSessionId,
       initialDisplayMode: input.modeHint,
       page: input.page,
+      lines: input.lines,
       viewerState: input.modeHint ? {
         displayMode: input.modeHint,
         scrollTop: 0,
@@ -63,7 +66,9 @@ export function openFileTab(tabs: Tab[], input: OpenFileTabInput): Tab[] {
   );
   const sourceUnchanged = !sourceChanged;
   const pageChanged = existing.page !== input.page;
-  if (sourceUnchanged && !input.modeHint && !pageChanged) return tabs;
+  const linesChanged = existing.lines?.startLine !== input.lines?.startLine
+    || existing.lines?.endLine !== input.lines?.endLine;
+  if (sourceUnchanged && !input.modeHint && !pageChanged && !linesChanged) return tabs;
 
   return tabs.map((tab) => {
     if (tab.id !== input.tabId) return tab;
@@ -75,6 +80,10 @@ export function openFileTab(tabs: Tab[], input: OpenFileTabInput): Tab[] {
     }
     if (pageChanged) {
       next.page = input.page;
+      bumpRevision = true;
+    }
+    if (linesChanged) {
+      next.lines = input.lines;
       bumpRevision = true;
     }
     if (input.modeHint) {

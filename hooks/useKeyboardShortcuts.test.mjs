@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { handleGlobalEscape, isNewSessionShortcut, registerAbortHandler } from "./useKeyboardShortcuts.ts";
+import { handleGlobalEscape, isDictateShortcut, isNewSessionShortcut, registerAbortHandler } from "./useKeyboardShortcuts.ts";
 
 function keydown(key, { tagName = "BUTTON", defaultPrevented = false } = {}) {
   return {
@@ -90,4 +90,23 @@ test("a KeyboardEvent without a code still matches by key", () => {
   assert.equal(isNewSessionShortcut({ key: "Dead", code: null, ctrlKey: true, altKey: true }), false);
   assert.equal(shortcut({ key: "n", code: "" }), true);
   assert.equal(shortcut({ key: "Dead", code: "" }), false);
+});
+
+function dictate({ key = "m", code = "KeyM", ctrlKey = true, altKey = true } = {}) {
+  return isDictateShortcut({ key, code, ctrlKey, altKey });
+}
+
+test("Ctrl+Alt+M toggles dictation in the composer", () => {
+  assert.equal(dictate(), true);
+  assert.equal(dictate({ key: "M" }), true);
+  // macOS dead key: the physical key decides.
+  assert.equal(dictate({ key: "Dead" }), true);
+});
+
+test("dictation leaves typed characters and other keys alone", () => {
+  // Windows AltGr as Ctrl+Alt: what it types is text.
+  assert.equal(dictate({ key: "\u00b5" }), false);
+  assert.equal(dictate({ key: "n" }), false);
+  assert.equal(dictate({ ctrlKey: false }), false);
+  assert.equal(dictate({ altKey: false }), false);
 });

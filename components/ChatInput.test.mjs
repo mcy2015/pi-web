@@ -101,13 +101,18 @@ test("follow-up shortcuts preserve newline, IME, mobile and completion behavior"
     ["an open extension dialog hides slash completion", {}, { isStreaming: false, extensionUiOpen: true, slashMenuOpen: true, slashQuery: "help" }, "send"],
     ["an open extension dialog hides file completion", {}, { isStreaming: false, extensionUiOpen: true, atMenuOpen: true, atQuery: {} }, "send"],
     ["an open extension dialog hides history selection", {}, { isStreaming: false, extensionUiOpen: true, historyMenuOpen: true }, "send"],
+    ["Ctrl+Alt+M toggles dictation", { key: "m", ctrlKey: true, altKey: true }, { speechSupported: true, toggleSpeech() { action = "dictate"; } }, "dictate"],
+    ["dictation stays off where unsupported", { key: "m", ctrlKey: true, altKey: true }, {}, "native"],
   ];
+  let action = "native";
   for (const [name, keys, state, expected] of cases) {
-    let action = "native";
+    action = "native";
     const handler = script.runInNewContext({
       Date: { now: () => 1000 },
       COMPOSITION_END_ENTER_GRACE_MS: 100,
       isMobile: false, isStreaming: true, enterSendMode: "enter",
+      isDictateShortcut: (event) => event.ctrlKey && event.altKey && event.key.toLowerCase() === "m",
+      speechSupported: false, toggleSpeech() {},
       isComposingRef: { current: false }, lastCompositionEndAtRef: { current: 0 },
       extensionUiOpen: false,
       historyMenuOpen: false, inputHistory: ["previous"], historyActiveIndex: 0,
@@ -310,6 +315,7 @@ test("file mention arrows wrap around the match list", () => {
       sendQueued() {}, handleSend() {},
       applySlashCommand() {},
       isExactSlashCommand() { return false; }, value: "@file",
+      isDictateShortcut: () => false, speechSupported: false, toggleSpeech() {},
       setSlashMenuOpen() {}, setAtMenuOpen() {},
       applyAtCompletion() {},
       applyHistoryInput() {},

@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { getFileIcon } from "./FileIcons";
 import { useHorizontalStrip } from "@/hooks/useHorizontalStrip";
 import { useI18n } from "@/hooks/useI18n";
+import type { FileLineRange } from "@/lib/file-links";
 import type { FileViewerDisplayMode, FileViewerState } from "@/lib/file-viewer-state";
 
 export interface Tab {
@@ -16,6 +17,8 @@ export interface Tab {
   initialDisplayMode?: FileViewerDisplayMode;
   /** PDF page requested by the link that opened this tab (`#page=N`). */
   page?: number;
+  /** Source lines requested by the link that opened this tab (`#L12-L15`, `path:12`). */
+  lines?: FileLineRange;
   viewerState?: FileViewerState;
   viewerRevision?: number;
 }

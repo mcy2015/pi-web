@@ -11,6 +11,7 @@ import { FileViewer, getFileApiUrl } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
 import { movePanelTab, orderPanelTabs } from "@/lib/panel-tab-order";
 import { openFileTab, saveFileViewerState, saveParkedFileViewerState, switchFileWorkspace, type ParkedFileWorkspace } from "./file-tab-state";
+import type { FileLineRange } from "@/lib/file-links";
 import { SettingsPanel, SettingsSectionIcon } from "./SettingsPanel";
 import { ProjectTrustDialog, type ProjectTrustFailure } from "./ProjectTrustDialog";
 import { BranchNavigator, hasSessionBranches } from "./BranchNavigator";
@@ -1363,17 +1364,19 @@ export function AppShell() {
   const handleOpenFile = useCallback((
     filePath: string,
     fileName: string,
-    options?: { sourceSessionId?: string | null; modeHint?: "diff"; page?: number },
+    options?: { sourceSessionId?: string | null; modeHint?: "diff"; page?: number; lines?: FileLineRange },
   ) => {
     const sourceSessionId = options?.sourceSessionId;
     const modeHint = options?.modeHint;
     const page = options?.page;
+    const lines = options?.lines;
     const tabId = `file:${filePath}`;
     setFileTabs((prev) => openFileTab(prev, {
       fileName,
       filePath,
       modeHint,
       page,
+      lines,
       sourceSessionId,
       tabId,
     }));
@@ -1383,8 +1386,8 @@ export function AppShell() {
     if (isMobile) setSidebarOpen(false);
   }, [isMobile]);
 
-  const handleOpenLinkedFile = useCallback((filePath: string, page?: number) => {
-    handleOpenFile(filePath, getFileName(filePath), { sourceSessionId: selectedSession?.id ?? null, page });
+  const handleOpenLinkedFile = useCallback((filePath: string, page?: number, lines?: FileLineRange) => {
+    handleOpenFile(filePath, getFileName(filePath), { sourceSessionId: selectedSession?.id ?? null, page, lines });
   }, [handleOpenFile, selectedSession?.id]);
 
   // The /files page of its own: same cwd, and the open file when the active
@@ -3103,6 +3106,7 @@ export function AppShell() {
               onOpenSettings={openSettingsSection}
               onContextUsageChange={handleContextUsageChange}
               onOpenFile={handleOpenLinkedFile}
+              onOpenAllChanges={handleOpenFilesPage}
               onFilesUploaded={handleExplorerRefresh}
               onOpenSubagent={handleOpenSubagentTab}
               onEnterSubagent={handleEnterSubagent}
@@ -3266,6 +3270,7 @@ export function AppShell() {
               gitRefreshKey={explorerRefreshKey}
               initialDisplayMode={activeFileTab.initialDisplayMode}
               initialPage={activeFileTab.page}
+              initialLines={activeFileTab.lines}
               initialState={activeFileTab.viewerState}
               watchEnabled={rightPanelOpen}
               onStateChange={(viewerState) => handleFileViewerStateChange(
@@ -3276,10 +3281,10 @@ export function AppShell() {
               )}
               onMentionLines={rightPanelOpen ? handleFileLineMention : undefined}
               onAtMention={handleAtMention}
-              onOpenFile={(filePath, page) => handleOpenFile(
+              onOpenFile={(filePath, page, lines) => handleOpenFile(
                 filePath,
                 getFileName(filePath),
-                { sourceSessionId: activeFileTab.sourceSessionId, page },
+                { sourceSessionId: activeFileTab.sourceSessionId, page, lines },
               )}
               onAddToChat={(filePath) => handleAddImageToChat(filePath, activeFileTab.sourceSessionId)}
             />

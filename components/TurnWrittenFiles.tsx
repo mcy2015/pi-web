@@ -13,9 +13,11 @@ import { getFileIcon } from "./FileIcons";
  * chip carries the file's working-tree `+n −m` line counts while they are
  * uncommitted (a committed or reverted file simply shows none).
  */
-export function TurnWrittenFiles({ files, onOpenFile, cwd }: {
+export function TurnWrittenFiles({ files, onOpenFile, onOpenAllChanges, cwd }: {
   files: WrittenFile[];
   onOpenFile?: (filePath: string) => void;
+  /** Opens the working tree's full change list (the /files page); absent where there is none. */
+  onOpenAllChanges?: () => void;
   cwd?: string;
 }) {
   const { t } = useI18n();
@@ -59,6 +61,26 @@ export function TurnWrittenFiles({ files, onOpenFile, cwd }: {
           </button>
         );
       })}
+      {onOpenAllChanges && (
+        <button
+          type="button"
+          onClick={onOpenAllChanges}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+            padding: "2px 8px",
+            fontSize: 11,
+            color: "var(--text-muted)",
+            background: "transparent",
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            cursor: "pointer",
+          }}
+        >
+          {t("files.viewAllChanges")}
+        </button>
+      )}
     </div>
   );
 }

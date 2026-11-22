@@ -23,7 +23,7 @@ import { FILE_WATCH_HEARTBEAT_MS, fileVersion, fileVersionChanged } from "@/lib/
 import { injectSandboxedHtmlPolyfill } from "@/lib/html-sandbox-polyfill";
 import { HIDDEN_PAGE_GRACE_MS, usePageHiddenFor } from "@/hooks/usePageHidden";
 import { pageId, trackEventSource } from "@/lib/page-debug";
-import { parsePdfPageFragment, resolveLocalFileHref, shouldOpenLocalFileInApp } from "@/lib/file-links";
+import { parseFileLineFragment, parsePdfPageFragment, resolveLocalFileHref, shouldOpenLocalFileInApp, type FileLineRange, type OpenFileHandler } from "@/lib/file-links";
 import { parseFrontmatter } from "@/lib/frontmatter";
 import { isExternalMarkdownHref, jumpToMarkdownFragment, markdownAppUrlTransform, markdownPreviewRehypePlugins, markdownPreviewRemarkPlugins, markdownUrlTransform, normalizeDisplayMath } from "@/lib/markdown";
 import { CodeBlock, MermaidBlock } from "./MermaidBlock";
@@ -49,7 +49,7 @@ interface Props {
   filePath: string;
   cwd?: string;
   sourceSessionId?: string | null;
-  onOpenFile?: (filePath: string, page?: number) => void;
+  onOpenFile?: OpenFileHandler;
   onMentionLines?: (relativePath: string, startLine: number, endLine: number) => void;
   /** Insert this file's relative path into the chat input (@ mention). */
   onAtMention?: (relativePath: string, isDir: boolean) => void;
@@ -57,6 +57,8 @@ interface Props {
   initialDisplayMode?: DisplayMode;
   /** PDF page to open on first render (`#page=N` from a markdown link). */
   initialPage?: number;
+  /** Source lines to scroll to and highlight on first render (`#L12-L15`, `path:12`). */
+  initialLines?: FileLineRange;
   initialState?: FileViewerState;
   onStateChange?: (state: FileViewerState) => void;
   watchEnabled?: boolean;
@@ -142,11 +144,38 @@ const FILE_PINNED_LINE_NUMBER_STYLE: CSSProperties = {
 
 type SourceCodeRendererProps = Parameters<NonNullable<SyntaxHighlighterProps["renderer"]>>[0] & {
   wrapLines: boolean;
+  highlightedLines?: FileLineRange | null;
 };
 
 interface SelectedLineRange {
   startLine: number;
   endLine: number;
+}
+
+/** The background a link's line reference (`#L12-L15`) paints on its lines. */
+const SOURCE_LINE_HIGHLIGHT_STYLE: CSSProperties = {
+  backgroundColor: "var(--bg-selected)",
+  boxShadow: "inset 2px 0 0 var(--accent)",
+};
+
+function isHighlightedLine(lineNumber: number, highlightedLines: FileLineRange | null | undefined): boolean {
+  return !!highlightedLines
+    && lineNumber >= highlightedLines.startLine
+    && lineNumber <= highlightedLines.endLine;
+}
+
+/** The row a line reference scrolls to: its own, or the last loaded line before it. */
+function findSourceLineElement(root: HTMLElement, lineNumber: number): HTMLElement | null {
+  const exact = root.querySelector<HTMLElement>(`.file-source-line[data-line-number="${lineNumber}"]`);
+  if (exact) return exact;
+  let closest: HTMLElement | null = null;
+  for (const element of root.querySelectorAll<HTMLElement>(".file-source-line[data-line-number]")) {
+    const elementLine = Number(element.dataset.lineNumber);
+    if (!Number.isInteger(elementLine)) continue;
+    if (elementLine < lineNumber) closest = element;
+    else break;
+  }
+  return closest;
 }
 
 function MentionIcon() {
@@ -216,7 +245,7 @@ function getSelectedSourceLineRange(root: HTMLElement, selection: Selection | nu
   return { startLine, endLine };
 }
 
-function SourceCodeRenderer({ rows, stylesheet, useInlineStyles, wrapLines }: SourceCodeRendererProps) {
+function SourceCodeRenderer({ rows, stylesheet, useInlineStyles, wrapLines, highlightedLines }: SourceCodeRendererProps) {
   return rows.map((row, lineIndex) => {
     const children = row.children ?? [];
     const firstChildClasses = children[0]?.properties?.className;
@@ -230,7 +259,11 @@ function SourceCodeRenderer({ rows, stylesheet, useInlineStyles, wrapLines }: So
         className="file-source-line"
         data-line-number={lineIndex + 1}
         key={`source-line-${lineIndex}`}
-        style={{ display: "flex", minWidth: "100%" }}
+        style={{
+          display: "flex",
+          minWidth: "100%",
+          ...(isHighlightedLine(lineIndex + 1, highlightedLines) ? SOURCE_LINE_HIGHLIGHT_STYLE : undefined),
+        }}
       >
         {lineNumberNode && renderSyntaxNode({
           node: lineNumberNode,
@@ -1298,6 +1331,7 @@ export function FileViewer({
   gitRefreshKey,
   initialDisplayMode,
   initialState,
+  initialLines,
   initialPage,
   onStateChange,
   watchEnabled: watchRequested = true,
@@ -1329,6 +1363,7 @@ export function FileViewer({
       onAtMention={onAtMention}
       gitRefreshKey={gitRefreshKey}
       initialDisplayMode={initialDisplayMode}
+      initialLines={initialLines}
       initialState={initialState}
       onStateChange={onStateChange}
       watchEnabled={watchEnabled}
@@ -1345,6 +1380,7 @@ function TextFileViewer({
   onAtMention,
   gitRefreshKey,
   initialDisplayMode,
+  initialLines,
   initialState,
   onStateChange,
   watchEnabled = true,
@@ -1358,7 +1394,11 @@ function TextFileViewer({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const requestedInitialDisplayMode = resolveInitialFileDisplayMode(initialState, initialDisplayMode);
+  const requestedInitialDisplayMode = initialLines
+    // A line reference reads source, not a rendered page: it wins over a
+    // restored preview state (a new reference bumps the revision, remounting).
+    ? "source"
+    : resolveInitialFileDisplayMode(initialState, initialDisplayMode);
   const initialWrapLines = resolveInitialWrapLines(initialState, filePath);
   const initialScrollTop = initialState?.scrollTop ?? 0;
   const initialScrollLeft = initialState?.scrollLeft ?? 0;
@@ -1375,7 +1415,7 @@ function TextFileViewer({
   const contentRef = useRef<HTMLDivElement | null>(null);
   const autoDiffAppliedRef = useRef(false);
   const defaultPreviewEligibleRef = useRef(
-    initialState === undefined && initialDisplayMode === undefined,
+    initialState === undefined && initialDisplayMode === undefined && initialLines === undefined,
   );
   const scrollRestorePendingRef = useRef(true);
   const viewerStateRef = useRef<FileViewerState>({
@@ -1386,6 +1426,12 @@ function TextFileViewer({
   });
   const onStateChangeRef = useRef(onStateChange);
   const [selectedLineRange, setSelectedLineRange] = useState<SelectedLineRange | null>(null);
+  // The lines a link pointed at (`#L12-L15`): painted on its rows for as long
+  // as this mount lives. Read-only state — a remount is what changes it.
+  const [highlightedLines] = useState<FileLineRange | null>(initialLines ?? null);
+  // The lines have been scrolled to once; later renders (wrap toggle, prism
+  // languages arriving) must not move the view again.
+  const scrolledToLinesRef = useRef(false);
   // Whole file for an HTML preview whose source view is still chunked.
   const [htmlFull, setHtmlFull] = useState<{ text?: string; error?: string } | null>(null);
 
@@ -1696,14 +1742,14 @@ function TextFileViewer({
           },
         }}
         renderer={(rendererProps) => (
-          <SourceCodeRenderer {...rendererProps} wrapLines={wrapLines} />
+          <SourceCodeRenderer {...rendererProps} wrapLines={wrapLines} highlightedLines={highlightedLines} />
         )}
         wrapLongLines={wrapLines}
       >
         {viewerContent}
       </SyntaxHighlighter>
     ),
-    [isDark, language, prismReady, viewerContent, wrapLines],
+    [isDark, language, prismReady, viewerContent, wrapLines, highlightedLines],
   );
   const lightweightSourceLines = useMemo(
     () => useLightweightSource ? sourceLines.map((line, lineIndex) => (
@@ -1711,7 +1757,11 @@ function TextFileViewer({
         className="file-source-line"
         data-line-number={lineIndex + 1}
         key={`source-line-${lineIndex}`}
-        style={{ display: "flex", minWidth: "100%" }}
+        style={{
+          display: "flex",
+          minWidth: "100%",
+          ...(isHighlightedLine(lineIndex + 1, highlightedLines) ? SOURCE_LINE_HIGHLIGHT_STYLE : undefined),
+        }}
       >
         <span aria-hidden="true" style={FILE_LINE_NUMBER_STYLE}>
           {lineIndex + 1}
@@ -1729,7 +1779,7 @@ function TextFileViewer({
         </span>
       </span>
     )) : null,
-    [sourceLines, useLightweightSource, wrapLines],
+    [sourceLines, useLightweightSource, wrapLines, highlightedLines],
   );
 
   useEffect(() => {
@@ -1807,6 +1857,21 @@ function TextFileViewer({
     requestedInitialDisplayMode,
   ]);
 
+  // A link's line reference scrolls its lines into view once the source has
+  // rendered. It runs after the restore effect above, so a restored scroll
+  // position cannot undo the positioning.
+  useEffect(() => {
+    if (!highlightedLines || scrolledToLinesRef.current || loading || error) return;
+    if (effectiveDisplayMode !== "source") return;
+    const content = contentRef.current;
+    if (!content) return;
+    const lineElement = findSourceLineElement(content, highlightedLines.startLine);
+    if (!lineElement) return;
+    scrolledToLinesRef.current = true;
+    content.scrollTop += lineElement.getBoundingClientRect().top - content.getBoundingClientRect().top
+      - Math.floor(content.clientHeight / 2) + lineElement.clientHeight;
+  }, [highlightedLines, effectiveDisplayMode, loading, error, data?.content]);
+
   // One renderer set per file: a new object each render would remount every
   // block of the preview (a rendered diagram back to its source) whenever
   // the shell re-renders, since onOpenFile is a new function each time.
@@ -1853,7 +1918,7 @@ function TextFileViewer({
         const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
           if (!shouldOpenLocalFileInApp(event)) return;
           event.preventDefault();
-          onOpenFileRef.current?.(linkedFile, parsePdfPageFragment(href) ?? undefined);
+          onOpenFileRef.current?.(linkedFile, parsePdfPageFragment(href) ?? undefined, parseFileLineFragment(href) ?? undefined);
         };
 
         return <a href={href} {...props} onClick={handleClick}>{children}</a>;

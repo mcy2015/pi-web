@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { FileViewer } from "./FileViewer";
+import type { FileLineRange } from "@/lib/file-links";
 import { TabBar, type Tab } from "./TabBar";
 import { TerminalPanel } from "./TerminalPanel";
 import { openFileTab, saveFileViewerState } from "./file-tab-state";
@@ -162,7 +163,7 @@ export function FilesPage() {
   const openFile = useCallback((
     filePath: string,
     fileName: string,
-    options?: { sourceSessionId?: string | null; modeHint?: "diff"; page?: number },
+    options?: { sourceSessionId?: string | null; modeHint?: "diff"; page?: number; lines?: FileLineRange },
   ) => {
     const tabId = `file:${filePath}`;
     setTabs((prev) => openFileTab(prev, {
@@ -170,6 +171,7 @@ export function FilesPage() {
       filePath,
       modeHint: options?.modeHint,
       page: options?.page,
+      lines: options?.lines,
       sourceSessionId: null,
       tabId,
     }));
@@ -388,10 +390,11 @@ export function FilesPage() {
                 gitRefreshKey={refreshKey}
                 initialDisplayMode={activeTab.initialDisplayMode}
                 initialPage={activeTab.page}
+                initialLines={activeTab.lines}
                 initialState={activeTab.viewerState}
                 watchEnabled
                 onStateChange={handleViewerStateChange}
-                onOpenFile={(filePath, page) => openFile(filePath, getFileName(filePath), { page })}
+                onOpenFile={(filePath, page, lines) => openFile(filePath, getFileName(filePath), { page, lines })}
               />
             ) : !terminalTabs.some((tab) => tab.id === activeTabId) ? (
               <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>

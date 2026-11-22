@@ -61,6 +61,23 @@ export function isNewSessionShortcut(event: {
   return event.key === "Dead" && event.code === "KeyN";
 }
 
+/**
+ * Whether a keydown is the Ctrl+Alt+M dictation toggle, for the composer's
+ * focused textarea (the mic button's keyboard twin). Same family and same
+ * platform caveats as `isNewSessionShortcut()`: the letter decides, so a
+ * Windows AltGr combination that types a character is left alone.
+ */
+export function isDictateShortcut(event: {
+  key: string;
+  code?: string | null;
+  ctrlKey: boolean;
+  altKey: boolean;
+}): boolean {
+  if (!event.ctrlKey || !event.altKey) return false;
+  if (event.key.toLowerCase() === "m") return true;
+  return event.key === "Dead" && event.code === "KeyM";
+}
+
 // ---------------------------------------------------------------------------
 // Hook: global keyboard shortcuts
 // ---------------------------------------------------------------------------

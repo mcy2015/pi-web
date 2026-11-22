@@ -15,13 +15,56 @@ import type { AgentMessage, SessionEntry } from "./types";
 
 export const MAX_SHARE_SNAPSHOT_BYTES = 25 * 1024 * 1024;
 
+/** One oversized turn of a refused share, to point at what makes it too large. */
+export interface ShareSizeCulprit {
+  /** 1-based index into the snapshot's messages (the turn it sits in). */
+  messageIndex: number;
+  role: AgentMessage["role"];
+  /** `image/png ×2` for inline images, else the turn's leading text. */
+  label: string;
+  bytes: number;
+}
+
 export class ShareSnapshotError extends Error {
   readonly code: "session_not_found" | "too_large";
+  readonly culprits?: ShareSizeCulprit[];
 
-  constructor(code: ShareSnapshotError["code"], message: string) {
+  constructor(code: ShareSnapshotError["code"], message: string, culprits?: ShareSizeCulprit[]) {
     super(message);
     this.code = code;
+    this.culprits = culprits;
   }
+}
+
+/** The largest turns of a snapshot, biggest first: what made it exceed the cap. */
+export function shareSizeCulprits(messages: AgentMessage[]): ShareSizeCulprit[] {
+  const culprits: ShareSizeCulprit[] = [];
+  messages.forEach((message, index) => {
+    const bytes = Buffer.byteLength(JSON.stringify(message), "utf8");
+    if (bytes < 64 * 1024) return;
+    let label = "";
+    const content = "content" in message ? message.content : undefined;
+    if (Array.isArray(content)) {
+      const mediaTypes: Record<string, number> = {};
+      for (const block of content) {
+        if (block?.type === "image" && block.source?.type === "base64" && block.source.data) {
+          const mediaType = block.source.media_type ?? "image";
+          mediaTypes[mediaType] = (mediaTypes[mediaType] ?? 0) + 1;
+        }
+      }
+      const counts = Object.entries(mediaTypes).map(([type, count]) => `${type} ×${count}`);
+      if (counts.length > 0) {
+        label = counts.join(", ");
+      } else {
+        const text = content.find((block) => block?.type === "text") as { text?: string } | undefined;
+        label = (text?.text ?? "").replace(/\s+/g, " ").trim().slice(0, 50);
+      }
+    } else if (typeof content === "string") {
+      label = content.replace(/\s+/g, " ").trim().slice(0, 50);
+    }
+    culprits.push({ messageIndex: index + 1, role: message.role, label, bytes });
+  });
+  return culprits.sort((a, b) => b.bytes - a.bytes).slice(0, 3);
 }
 
 export function firstUserText(messages: AgentMessage[]): string {
@@ -85,6 +128,7 @@ export async function buildShareSnapshot(sessionId: string): Promise<SharedSessi
       `The session snapshot is ${Math.round(bytes / (1024 * 1024))} MB; the limit is ${
         MAX_SHARE_SNAPSHOT_BYTES / (1024 * 1024)
       } MB`,
+      shareSizeCulprits(context.messages),
     );
   }
 

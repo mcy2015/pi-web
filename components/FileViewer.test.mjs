@@ -21,6 +21,10 @@ test("lightweight source rows are skipped for highlighted, diff, and preview vie
       const SOURCE_HIGHLIGHT_MAX_LINES = 1_000;
       const HTML_PREVIEW_MAX_BYTES = 10 * 1024 * 1024;
       const FILE_LINE_NUMBER_STYLE = {};
+      // Stand-ins for what a link's line reference passes on: none here.
+      const highlightedLines = null;
+      const isHighlightedLine = () => false;
+      const SOURCE_LINE_HIGHLIGHT_STYLE = {};
       ${calculations}
       return lightweightSourceLines;
     };
@@ -141,6 +145,10 @@ test("the line-number gutter is pinned only in views of at most SOURCE_HIGHLIGHT
       const HTML_PREVIEW_MAX_BYTES = 10 * 1024 * 1024;
       const FILE_LINE_NUMBER_STYLE = gutterStyle;
       const FILE_PINNED_LINE_NUMBER_STYLE = pinnedStyle;
+      // Stand-ins for what a link's line reference passes on: none here.
+      const highlightedLines = null;
+      const isHighlightedLine = () => false;
+      const SOURCE_LINE_HIGHLIGHT_STYLE = {};
       // Stand-ins for what the highlighted element only passes on.
       const [usePrismLanguages, SyntaxHighlighter, SourceCodeRenderer, isDark, vs, fileViewerDarkTheme, FILE_CODE_STYLE] = [() => true, "pre", "span", false, {}, {}, {}];
       ${calculations}

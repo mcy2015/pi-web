@@ -2,6 +2,7 @@
 
 import { MarkdownBody } from "./MarkdownBody";
 import { useI18n } from "@/hooks/useI18n";
+import type { OpenFileHandler } from "@/lib/file-links";
 import { formatCompactCount, formatCostShort } from "@/lib/session-stats-format";
 import type { BtwNote } from "@/lib/btw-note";
 
@@ -9,7 +10,7 @@ import type { BtwNote } from "@/lib/btw-note";
 export function BtwNoteCard({ note, cwd, onOpenFile }: {
   note: BtwNote;
   cwd?: string;
-  onOpenFile?: (filePath: string, page?: number) => void;
+  onOpenFile?: OpenFileHandler;
 }) {
   const { t } = useI18n();
   const stats: string[] = [];

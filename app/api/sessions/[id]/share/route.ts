@@ -50,7 +50,7 @@ export async function POST(req: Request, { params }: Params) {
   } catch (error) {
     if (error instanceof ShareSnapshotError) {
       return NextResponse.json(
-        { error: error.message, code: error.code },
+        { error: error.message, code: error.code, culprits: error.culprits },
         { status: error.code === "session_not_found" ? 404 : 413 },
       );
     }

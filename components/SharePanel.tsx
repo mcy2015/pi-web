@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { copyText } from "@/lib/clipboard";
+import type { ShareSizeCulprit } from "@/lib/share-snapshot";
 import { formatRelativeTime } from "@/lib/i18n/format";
 import {
   DEFAULT_SHARE_DURATION_DAYS,
@@ -72,9 +73,18 @@ export function shareLinkUrl(origin: string, code: string): string {
  * parameters: the size limit says so in its own words, anything else shows
  * the server's error (or its status when it sent none).
  */
-export function shareCreateFailure(data: { error?: string; code?: string }, status: number): { key: string; params?: { error: string } } {
-  if (data.code === "too_large" || data.error === "too_large") return { key: "share.tooLarge" };
+export function shareCreateFailure(data: { error?: string; code?: string; culprits?: ShareSizeCulprit[] }, status: number): { key: string; params?: { error: string }; culprits?: ShareSizeCulprit[] } {
+  if (data.code === "too_large" || data.error === "too_large") {
+    return data.culprits && data.culprits.length > 0 ? { key: "share.tooLarge", culprits: data.culprits } : { key: "share.tooLarge" };
+  }
   return { key: "share.createError", params: { error: data.error ?? `HTTP ${status}` } };
+}
+
+/** KB below one MB, MB above; a culprit list is a rough "what to trim". */
+function formatShareCulpritBytes(bytes: number): string {
+  return bytes >= 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
 function errorText(reason: unknown): string {
@@ -107,6 +117,7 @@ export function SharePanel({
   const [state, setState] = useState<SharePanelState>({ status: "loading" });
   const [busy, setBusy] = useState<"create" | "stop" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sizeCulprits, setSizeCulprits] = useState<ShareSizeCulprit[] | null>(null);
   const [stopArmed, setStopArmed] = useState(false);
   const [duration, setDuration] = useState<ShareDurationDays>(DEFAULT_SHARE_DURATION_DAYS);
   const [messageCount, setMessageCount] = useState<number | null>(null);
@@ -169,23 +180,27 @@ export function SharePanel({
     pendingRef.current = true;
     setBusy("create");
     setError(null);
+    setSizeCulprits(null);
     request(`/api/sessions/${encodeURIComponent(sessionId)}/share`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: shareCreateBody(duration),
     })
       .then(async (response) => {
-        const data = await response.json().catch(() => ({})) as { code?: string; createdAt?: string; expiresAt?: string | null; durationDays?: ShareDurationDays; title?: string; error?: string };
+        const data = await response.json().catch(() => ({})) as { code?: string; createdAt?: string; expiresAt?: string | null; durationDays?: ShareDurationDays; title?: string; error?: string; culprits?: ShareSizeCulprit[] };
         if (!activeCreateOk(data)) {
-          const { key, params } = shareCreateFailure(data, response.status);
+          const { key, params, culprits } = shareCreateFailure(data, response.status);
           setError(t(key, params));
+          setSizeCulprits(culprits ?? null);
           return;
         }
         setState({ status: "shared", share: { code: data.code, createdAt: data.createdAt, expiresAt: data.expiresAt, durationDays: data.durationDays, title: data.title } });
         setStopArmed(false);
+        setSizeCulprits(null);
       })
       .catch((reason: unknown) => {
         setError(t("share.createError", { error: errorText(reason) }));
+        setSizeCulprits(null);
       })
       .finally(() => {
         pendingRef.current = false;
@@ -240,6 +255,7 @@ export function SharePanel({
       messageCount={messageCount}
       busy={busy}
       error={error}
+      sizeCulprits={sizeCulprits}
       stopArmed={stopArmed}
       duration={duration}
       origin={pageOrigin}
@@ -267,6 +283,7 @@ export function SharePanelView({
   messageCount,
   busy,
   error,
+  sizeCulprits,
   stopArmed,
   duration,
   origin,
@@ -280,6 +297,8 @@ export function SharePanelView({
   messageCount: number | null;
   busy: "create" | "stop" | null;
   error: string | null;
+  /** What made a too-large share too large (`share.tooLarge` only). */
+  sizeCulprits: ShareSizeCulprit[] | null;
   stopArmed: boolean;
   /** The duration the select shows; both states share one control. */
   duration: ShareDurationDays;
@@ -349,6 +368,20 @@ export function SharePanelView({
         </>
       )}
       {error && <div role="alert" className="sidebar-share-error">{error}</div>}
+      {error && sizeCulprits && sizeCulprits.length > 0 && (
+        <div className="sidebar-share-culprits" style={{ marginTop: 6, fontSize: 11, lineHeight: 1.5, color: "var(--text-dim)" }}>
+          <div>{t("share.tooLargeCulprits")}</div>
+          <ul style={{ margin: "4px 0", paddingLeft: 16 }}>
+            {sizeCulprits.map((culprit) => (
+              <li key={culprit.messageIndex}>
+                #{culprit.messageIndex} · {culprit.role} · {formatShareCulpritBytes(culprit.bytes)}
+                {culprit.label ? ` · ${culprit.label}` : ""}
+              </li>
+            ))}
+          </ul>
+          <div>{t("share.tooLargeHint")}</div>
+        </div>
+      )}
     </div>
   );
 }
