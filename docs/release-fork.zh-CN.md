@@ -3,8 +3,8 @@
 > fork 的 npm 包是 `@mcy2015/pi-web`，发布走**本地手动**（上游 agegr/pi-web 走 CI Trusted Publishing，fork 未配置）。
 > 前提：工作区干净、在 `personal/main` 分支、`package.json` 版本已就位（合并上游后通常已对齐上游版本号）。
 >
-> **一键脚本**：`./scripts/release-fork.sh` 把本页全部步骤固化，每步幂等（中断后重跑自动跳过已完成步骤）；
-> `fonts.googleapis.com` 被断时自动走离线字体 mock 构建（见步骤 4 注）。手动逐步操作仍按下文执行。
+> **一键脚本**：`./scripts/release-fork.sh` 固化步骤 0-6（预检→bump→push→登录检查→构建→publish→清 .next），每步幂等（中断后重跑自动跳过已完成步骤）；
+> `fonts.googleapis.com` 被断时自动走离线字体 mock 构建（见步骤 4 注）。本机升级与验证（7-8）不进脚本：npm registry 对新版本是**异步处理**（PUT 202 ≠ 立即可装，实测延迟约 10 分钟），脚本内立即 `npm i -g @latest` 会装到旧版 —— 等新 tarball 可用后再手动升级。
 
 ## 发布步骤
 
@@ -45,23 +45,24 @@ npm publish --access public
 # 6) 清掉生产 .next，恢复 dev 环境（下次 npm run dev 自动重建）
 rm -rf .next
 
-# 7) 本机常驻服务升级 + 重启
+# 7) 本机常驻服务升级 + 重启（手动；不在脚本内：publish 后 npm 异步上架需几分钟，
+#    立即 npm i -g @latest 会装到旧版，等 `npm view @mcy2015/pi-web version` 应答新版本号再执行）
 #    30141 端口 launchd 服务名沿用了历史名 com.agegr.pi-web，跑的就是全局安装的 fork 包。
-npm i -g @mcy2015/pi-web@latest
+npm i -g @mcy2015/pi-web@$(node -p "require('./package.json').version")
 launchctl kickstart -k gui/$(id -u)/com.agegr.pi-web
 ```
 
-## 验证
+## 验证（手动；web password 下无凭据 curl /api/* 是 401，属预期）
 
 ```bash
-# 常驻服务版本应答 0.14.3（/api/app-update 的 currentVersion）
+# npm registry 侧确认（新版本号应答出来才算上架完成）
+npm view @mcy2015/pi-web version dist-tags
+
+# 常驻服务版本应答（/api/app-update 的 currentVersion；浏览器登录后看也可）
 curl -s http://127.0.0.1:30141/api/app-update | jq
 
 # 页面冒烟（可选）：首页 200
 curl -s -o /dev/null -w "HTTP %{http_code}\n" http://127.0.0.1:30141/
-
-# npm registry 侧确认
-npm view @mcy2015/pi-web version dist-tags
 ```
 
 ## 排错速查
@@ -70,7 +71,8 @@ npm view @mcy2015/pi-web version dist-tags
 |---|---|
 | `npm run release` 报工作区不干净 | 先 `git status` 处理未提交改动（npm version 要求干净树） |
 | `npm publish` 401 | `npm login` 重新登录 |
-| 装完新包服务起不来 / 白页 | 发布时没跑 `npm run build`，包里 .next 是 dev 残留 → 重新走 4-5-7 步 |
+| 装完新包服务起不来 / 白页 | 发布时没跑 `npm run build`，包里 .next 是 dev 残留 → 重新走 4-5 步，再手动升级 |
+| 装到的还是上一个版本 | npm 异步上架未完成（PUT 202 ≠ 可装，延迟几分钟到十几分钟）：`npm view @mcy2015/pi-web version` 等新版本号应答后，用**确切版本号** `npm i -g` 而非 `@latest` |
 | Actions 里 Release workflow 红叉 | fork 没配 Trusted Publishing，预期行为，本地 publish 为准（或 disable 该 workflow） |
 | dev 起不来 / 行为诡异 | 发布后忘了删 `.next`（生产构建与 Turbopack dev 互斥）→ `rm -rf .next` 再 `npm run dev` |
 

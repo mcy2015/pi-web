@@ -24,8 +24,6 @@ for arg in "$@"; do
 done
 
 PKG="@mcy2015/pi-web"
-SERVICE="com.agegr.pi-web"
-PLIST="$HOME/Library/LaunchAgents/${SERVICE}.plist"
 FONT_CSS_URL="https://fonts.loli.net/css2?family=Noto+Sans+Mono:wght@100..900&display=swap"
 GOOGLEAPIS_URL="https://fonts.googleapis.com/css2?family=Noto+Sans+Mono:wght@100..900&display=swap"
 FONT_CACHE_DIR="$HOME/.cache/pi-web-release-fonts"
@@ -38,7 +36,7 @@ die()  { printf '\033[31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 version() { node -p "require('$repo/package.json').version"; }
 
 # ---------------------------------------------------------------- step 0: guards
-step "[0/8] pre-flight"
+step "[0/6] pre-flight"
 branch="$(git rev-parse --abbrev-ref HEAD)"
 [ "$branch" = "personal/main" ] || die "not on personal/main (currently: $branch). Releases happen on personal/main only."
 [ -z "$(git status --porcelain)" ] || die "working tree is not clean — commit or stash first (npm version requires it)."
@@ -49,7 +47,7 @@ note "branch=$branch  version=$(version)"
 # published":  latest == version  → previous release shipped, bump a new one;
 #               latest  < version  → bumped but not yet published, keep it.
 # (A HEAD-tag check would re-bump whenever any commit lands after a Release.)
-step "[1/8] version bump"
+step "[1/6] version bump"
 registry_latest="$(npm view "$PKG" version 2>/dev/null || true)"
 [ -n "$registry_latest" ] || die "cannot read $PKG's latest version from the npm registry — network/npm state unclear, refusing to bump."
 relation="$(node -p "require('semver').compare('$registry_latest','$(version)')")"
@@ -60,11 +58,11 @@ case "$relation" in
 esac
 
 # --------------------------------------------------------- step 2: push (idempotent)
-step "[2/8] push commit + tags"
+step "[2/6] push commit + tags"
 git push --follow-tags origin personal/main
 
 # ------------------------------------------------------- step 3: npm auth (manual)
-step "[3/8] npm login check"
+step "[3/6] npm login check"
 if npm whoami >/dev/null 2>&1; then
   note "logged in as $(npm whoami)"
 else
@@ -72,7 +70,7 @@ else
 fi
 
 # ------------------------------------------------------------------ step 4: build
-step "[4/8] production build"
+step "[4/6] production build"
 if [ "$SKIP_BUILD" = 1 ]; then
   note "skipped (--skip-build); make sure .next holds a build of v$(version)."
 else
@@ -132,7 +130,7 @@ NODE
 fi
 
 # ---------------------------------------------------------------- step 5: publish
-step "[5/8] npm publish"
+step "[5/6] npm publish"
 published="$(npm view "$PKG" version 2>/dev/null || true)"
 if [ "$published" = "$(version)" ]; then
   note "$PKG@$(version) already on the registry — skipping."
@@ -141,38 +139,13 @@ else
 fi
 
 # ------------------------------------------------------- step 6: restore dev tree
-step "[6/8] remove production .next"
+step "[6/6] remove production .next"
 rm -rf .next
 note ".next removed (production build and Turbopack dev are mutually exclusive)."
 
-# --------------------------------------------------- step 7: upgrade local service
-step "[7/8] upgrade the local launchd service"
-npm i -g "${PKG}@latest"
-if [ -f "$PLIST" ]; then
-  launchctl kickstart -k "gui/$(id -u)/$SERVICE"
-  note "service $SERVICE restarted."
-else
-  note "no $PLIST — skipping the kickstart (not this machine's layout?)."
-fi
-
-# ----------------------------------------------------------------- step 8: verify
-step "[8/8] verify"
-npm_latest="$(npm view "$PKG" version 2>/dev/null || true)"
-note "registry: $PKG latest = ${npm_latest:-unknown}"
-
-current=""
-for i in 1 2 3 4 5 6; do
-  current="$(curl -s --max-time 5 http://127.0.0.1:30141/api/app-update | node -p "try{JSON.parse(require('fs').readFileSync(0,'utf8')).currentVersion}catch{return ''}" 2>/dev/null || true)"
-  [ -n "$current" ] && break
-  note "service not answering yet, retrying ($i/6)…"
-  sleep 5
-done
-
-if [ "$current" = "$(version)" ]; then
-  note "local service answers $(version) ✔"
-else
-  note "WARNING: local service answered '${current:-nothing}' (expected $(version))."
-  note "Check: launchctl print gui/$(id -u)/$SERVICE and curl http://127.0.0.1:30141/api/app-update"
-fi
-
-printf '\n\033[32mRelease v%s complete.\033[0m\n' "$(version)"
+# Steps beyond the publish are manual by design: npm's registry processes a new
+# version asynchronously (PUT 202 ≠ installable yet), so an immediate
+# `npm i -g @latest` can install the previous version; upgrade and verify the
+# local launchd service only after the registry serves the new tarball.
+printf '\n\033[32mRelease v%s published.\033[0m\n' "$(version)"
+note "next (manual): npm i -g ${PKG}@$(version) && launchctl kickstart -k gui/$(id -u)/com.agegr.pi-web"
