@@ -2,6 +2,9 @@
 
 > fork 的 npm 包是 `@mcy2015/pi-web`，发布走**本地手动**（上游 agegr/pi-web 走 CI Trusted Publishing，fork 未配置）。
 > 前提：工作区干净、在 `personal/main` 分支、`package.json` 版本已就位（合并上游后通常已对齐上游版本号）。
+>
+> **一键脚本**：`./scripts/release-fork.sh` 把本页全部步骤固化，每步幂等（中断后重跑自动跳过已完成步骤）；
+> `fonts.googleapis.com` 被断时自动走离线字体 mock 构建（见步骤 4 注）。手动逐步操作仍按下文执行。
 
 ## 发布步骤
 
@@ -26,6 +29,15 @@ npm run build
 #    package.json 无 prepack/prepublishOnly 脚本，npm publish 打包时 "files" 含 .next ——
 #    不先 build 发出去的就是 dev 残留（.next/dev 缓存），装上跑不起来。
 #    此步是 AGENTS.md「dev 期间禁跑 next build」红线的唯一例外场景。
+#    ⚠ 若本机网络对 fonts.googleapis.com SNI 阻断（curl/node 全断但 fonts.gstatic.com 通）：
+#    next/font 拉不到 CSS 会直接挂。解法（脚本已内置，手动路径见下）：
+#    a. 从镜像 fonts.loli.net 取同构 CSS（带 Chrome UA）；
+#    b. CSS 里 gstatic.loli.net 的 woff2 换成 fonts.gstatic.com 直连逐个下载到本地；
+#    c. CSS 内 URL 替换为本地绝对路径，写入 mock 文件 { "<googleapisUrl>": "<css>" }；
+#    d. NEXT_FONT_GOOGLE_MOCKED_RESPONSES=<mock.js路径> npm run build
+#      （该变量一设，字体文件下载也进 mock 模式：url 以 / 开头=readFileSync 本地路径，
+#        否则把 url 字符串当内容 —— 所以必须本地化全部 woff2）。
+#    确切 googleapis URL 用空 mock 探：报错 'Missing mocked response for URL: <url>' 里直接给出。
 
 # 5) 发布（scoped 包必须 --access public，package.json 无 publishConfig）
 npm publish --access public
