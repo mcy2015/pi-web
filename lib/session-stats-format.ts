@@ -3,9 +3,10 @@
 
 import type { TranslationParams } from "./i18n/types";
 
-/** 950 · 18k · 1.2M */
+/** 950 · 18k · 1.2M · 3.4B */
 export function formatCompactCount(value: number): string {
-  // 999_500 rounds to 1000k, which reads as 1.0M.
+  // 999_500 rounds to 1000k, which reads as 1.0M; likewise 999_500_000 reads as 1.0B.
+  if (value >= 999_500_000) return `${(value / 1_000_000_000).toFixed(1)}B`;
   if (value >= 999_500) return `${(value / 1_000_000).toFixed(1)}M`;
   if (value >= 1000) return `${(value / 1000).toFixed(0)}k`;
   return String(value);
