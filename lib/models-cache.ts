@@ -6,8 +6,6 @@ export interface ModelsData {
   defaultThinkingLevel: string | null;
   /** `defaultThinkingLevel` as saved in settings, which the reasoning selector's star marks. */
   savedDefaultThinkingLevel: string | null;
-  /** Where the saved defaults come from: none, the global file, or the project's own settings. */
-  defaultPreferenceScope?: { model: "none" | "global" | "project"; thinkingLevel: "none" | "global" | "project" };
   thinkingLevels: Record<string, string[]>;
   thinkingLevelMaps: Record<string, Record<string, string | null>>;
   /** `provider/modelId` → thinking level pinned by an `enabledModels` `:level` suffix. */

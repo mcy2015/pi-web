@@ -313,8 +313,6 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     isAutoThinkingSelection,
     defaultModel,
     savedDefaultThinkingLevel,
-    defaultPreferenceScope,
-    handleClearProjectDefault,
     agentPhase,
     isNew,
     editEntryId,
@@ -921,8 +919,6 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       modelSwitching={modelSwitching}
       defaultModel={defaultModel}
       onSetDefaultModel={handleSetDefaultModel}
-      defaultPreferenceScope={defaultPreferenceScope ?? undefined}
-      onClearProjectDefault={handleClearProjectDefault}
       onCompact={session || isNew ? handleCompact : undefined}
       onAbortCompaction={handleAbortCompaction}
       isCompacting={isCompacting}

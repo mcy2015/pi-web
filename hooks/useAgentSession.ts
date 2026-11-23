@@ -441,13 +441,6 @@ type UnconfirmedSend = {
 };
 /** `clear_queue` and `abort`: queued texts, plus the images of prompts parked behind a compaction. */
 type RecalledPrompts = { steering?: string[]; followUp?: string[]; images?: Array<{ data: string; mimeType: string }> };
-
-/** A project save that needs the folder trusted first; callers ask for the
- * trust step instead of showing it as a plain failure. */
-class TrustRequiredError extends Error {}
-
-/** How long a refused project save stays confirmable by picking it again. */
-const TRUST_RETRY_WINDOW_MS = 10_000;
 type ModelEntry = { id: string; name: string; provider: string; providerName: string };
 type ModelsResponse = {
   models: Record<string, string>;
@@ -455,7 +448,6 @@ type ModelsResponse = {
   defaultModel?: SelectedModel | null;
   defaultThinkingLevel?: string | null;
   savedDefaultThinkingLevel?: string | null;
-  defaultPreferenceScope?: { model: "none" | "global" | "project"; thinkingLevel: "none" | "global" | "project" };
   thinkingLevels?: Record<string, string[]>;
   thinkingLevelMaps?: Record<string, Record<string, string | null>>;
   thinkingLevelPins?: Record<string, string>;
@@ -523,7 +515,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [newSessionThinkingLevel, setNewSessionThinkingLevel] = useState<ConcreteThinkingLevel | null>(() => initialChoices?.thinkingLevel ?? null);
   const [newSessionDefaultThinkingLevel, setNewSessionDefaultThinkingLevel] = useState<ConcreteThinkingLevel | null>(null);
   const [savedDefaultThinkingLevel, setSavedDefaultThinkingLevel] = useState<ConcreteThinkingLevel | null>(null);
-  const [defaultPreferenceScope, setDefaultPreferenceScope] = useState<NonNullable<ModelsResponse["defaultPreferenceScope"]> | null>(null);
   const [currentThinkingOverride, setCurrentThinkingOverride] = useState<ConcreteThinkingLevel | null>(null);
   const [liveThinkingLevel, setLiveThinkingLevel] = useState<ConcreteThinkingLevel | null>(null);
   const [retryInfo, setRetryInfo] = useState<{ attempt: number; maxAttempts: number; errorMessage?: string } | null>(null);
@@ -2860,7 +2851,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     thinkingLevelPinsRef.current = d.thinkingLevelPins ?? {};
     defaultThinkingLevelRef.current = asConcreteThinkingLevel(d.defaultThinkingLevel);
     setSavedDefaultThinkingLevel(asConcreteThinkingLevel(d.savedDefaultThinkingLevel));
-    setDefaultPreferenceScope(d.defaultPreferenceScope ?? null);
     if (isNew && !sessionIdRef.current) {
       // A picked model this folder does not offer (one carried over from the
       // composer this one replaced, or since scoped out) goes back to automatic.
@@ -2919,39 +2909,25 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [allModelList, displayModel, isModelScopeActive, loadAllModels, modelList]);
 
   // Picking a model or reasoning level is session-scoped, as in the TUI. The
-  // selectors' star is the explicit Ctrl+S equivalent: it saves the default
-  // new sessions start with — globally, or for this project (`scope`), where
-  // `clear` removes saved project defaults — and also selects it for this chat.
+  // selectors' star is the explicit Ctrl+S equivalent: it saves the global
+  // default new sessions start with and also selects it for this chat.
   const saveDefaultPreferences = useCallback(async (
-    edit: { provider: string; modelId: string } | { thinkingLevel: ConcreteThinkingLevel } | Record<string, never>,
-    scope: "global" | "project" = "global",
-    options: { trustFolder?: boolean; clear?: ("model" | "thinkingLevel")[] } = {},
+    edit: { provider: string; modelId: string } | { thinkingLevel: ConcreteThinkingLevel },
   ) => {
     const cwd = newSessionCwd ?? session?.cwd;
     const res = await fetch("/api/models/default", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...(cwd ? { cwd } : {}),
-        scope,
-        ...(options.trustFolder ? { trustFolder: true } : {}),
-        ...(options.clear?.length ? { clear: options.clear } : {}),
-        ...edit,
-      }),
+      body: JSON.stringify({ ...(cwd ? { cwd } : {}), ...edit }),
     });
     if (res.ok) return;
     let detail = "";
-    let reason: string | undefined;
     try {
       const body: unknown = await res.json();
-      if (body && typeof body === "object") {
-        if ("error" in body && typeof body.error === "string") detail = body.error;
-        if ("reason" in body && typeof body.reason === "string") reason = body.reason;
-      }
+      if (body && typeof body === "object" && "error" in body && typeof body.error === "string") detail = body.error;
     } catch {
       // Non-JSON error responses fall back to the HTTP status.
     }
-    if (reason === "trust-required") throw new TrustRequiredError(detail || `HTTP ${res.status}`);
     throw new Error(detail || `HTTP ${res.status}`);
   }, [newSessionCwd, session?.cwd]);
 
@@ -2960,49 +2936,20 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     loadModels().catch(() => {});
   }, [loadModels]);
 
-  // A first project save into a fresh folder answers trust-required; picking
-  // the same save again within the window confirms the trust step, so the
-  // retry goes out with `trustFolder` (no window.confirm: nothing here owns a
-  // dialog layer — the page's trust dialog belongs to the Restricted banner).
-  const pendingTrustSaveRef = useRef<{ key: string; at: number } | null>(null);
-  const confirmTrustSave = (key: string) => {
-    const pending = pendingTrustSaveRef.current;
-    if (pending?.key === key && Date.now() - pending.at <= TRUST_RETRY_WINDOW_MS) {
-      pendingTrustSaveRef.current = null;
-      return true;
-    }
-    return false;
-  };
-  const offerTrustSave = (key: string) => {
-    pendingTrustSaveRef.current = { key, at: Date.now() };
-  };
-
-  const handleSetDefaultModel = useCallback(async (provider: string, modelId: string, scope: "global" | "project" = "global") => {
-    const trustKey = `model:${provider}/${modelId}`;
-    const trustFolder = scope === "project" && confirmTrustSave(trustKey);
+  const handleSetDefaultModel = useCallback(async (provider: string, modelId: string) => {
     try {
-      await saveDefaultPreferences({ provider, modelId }, scope, trustFolder ? { trustFolder: true } : {});
+      await saveDefaultPreferences({ provider, modelId });
     } catch (e) {
-      if (e instanceof TrustRequiredError) {
-        if (trustFolder) addNotice({ type: "error", message: `Failed to save default model: ${e.message}` });
-        else {
-          offerTrustSave(trustKey);
-          addNotice({ type: "warning", message: translate("chat.trustProjectToSave") });
-        }
-        return;
-      }
       addNotice({ type: "error", message: `Failed to save default model: ${e instanceof Error ? e.message : String(e)}` });
       return;
     }
-    addNotice({ type: "success", message: scope === "project"
-      ? translate("chat.defaultModelSavedProject", { model: `${provider}/${modelId}` })
-      : `Default model: ${provider}/${modelId}` });
+    addNotice({ type: "success", message: `Default model: ${provider}/${modelId}` });
     setNewSessionDefaultModel({ provider, modelId });
     if (displayModel?.provider !== provider || displayModel?.modelId !== modelId) {
       await handleModelChange(provider, modelId);
     }
     reloadModelsQuietly();
-  }, [addNotice, displayModel, handleModelChange, reloadModelsQuietly, saveDefaultPreferences, translate]);
+  }, [addNotice, displayModel, handleModelChange, reloadModelsQuietly, saveDefaultPreferences]);
 
 
   /**
@@ -3283,43 +3230,18 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [isNew]);
 
-  const handleSetDefaultThinkingLevel = useCallback(async (level: ConcreteThinkingLevel, scope: "global" | "project" = "global") => {
-    const trustKey = `thinkingLevel:${level}`;
-    const trustFolder = scope === "project" && confirmTrustSave(trustKey);
+  const handleSetDefaultThinkingLevel = useCallback(async (level: ConcreteThinkingLevel) => {
     try {
-      await saveDefaultPreferences({ thinkingLevel: level }, scope, trustFolder ? { trustFolder: true } : {});
+      await saveDefaultPreferences({ thinkingLevel: level });
     } catch (e) {
-      if (e instanceof TrustRequiredError) {
-        if (trustFolder) addNotice({ type: "error", message: `Failed to save default reasoning level: ${e.message}` });
-        else {
-          offerTrustSave(trustKey);
-          addNotice({ type: "warning", message: translate("chat.trustProjectToSave") });
-        }
-        return;
-      }
       addNotice({ type: "error", message: `Failed to save default reasoning level: ${e instanceof Error ? e.message : String(e)}` });
       return;
     }
-    addNotice({ type: "success", message: scope === "project"
-      ? translate("chat.defaultThinkingSavedProject", { level })
-      : `Default reasoning level: ${level}` });
+    addNotice({ type: "success", message: `Default reasoning level: ${level}` });
     setSavedDefaultThinkingLevel(level);
     if (displayThinkingLevel !== level) await handleThinkingLevelChange(level);
     reloadModelsQuietly();
-  }, [addNotice, displayThinkingLevel, handleThinkingLevelChange, reloadModelsQuietly, saveDefaultPreferences, translate]);
-
-  // Removes this project's own default, so the global one applies again; the
-  // chat in view keeps its session-scoped pick.
-  const handleClearProjectDefault = useCallback(async (kind: "model" | "thinkingLevel") => {
-    try {
-      await saveDefaultPreferences({}, "project", { clear: [kind] });
-    } catch (e) {
-      addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });
-      return;
-    }
-    addNotice({ type: "success", message: translate(kind === "model" ? "chat.projectDefaultClearedModel" : "chat.projectDefaultClearedThinking") });
-    reloadModelsQuietly();
-  }, [addNotice, reloadModelsQuietly, saveDefaultPreferences, translate]);
+  }, [addNotice, displayThinkingLevel, handleThinkingLevelChange, reloadModelsQuietly, saveDefaultPreferences]);
 
   const handleToolPresetChange = useCallback(async (preset: ToolPreset) => {
     const toolNames = getToolNamesForPreset(preset);
@@ -3808,7 +3730,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     isAutoThinkingSelection: isNew && newSessionThinkingLevel === null,
     defaultModel: newSessionDefaultModel,
     savedDefaultThinkingLevel,
-    defaultPreferenceScope,
     agentPhase,
     isNew,
     // The ephemeral session in view (the toggle's pick once it created one),
@@ -3833,7 +3754,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     cancelEdit: editEntryId ? cancelEdit : undefined,
     addNotice,
     setNoticePaused: setPausedNoticeId,
-    handleToolPresetChange, handleThinkingLevelChange, handleSetDefaultModel, handleSetDefaultThinkingLevel, handleClearProjectDefault, loadTools, loadSlashCommands, loadAllModels, setActiveLeafId, setData, setMessages, loadContext,
+    handleToolPresetChange, handleThinkingLevelChange, handleSetDefaultModel, handleSetDefaultThinkingLevel, loadTools, loadSlashCommands, loadAllModels, setActiveLeafId, setData, setMessages, loadContext,
     scrollToBottom, scrollUserMsgToTop, scrollToMessage,
     dispatch, setAgentRunning, setForkingEntryId,
     bashRunning, pendingBash,

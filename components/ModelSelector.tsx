@@ -36,17 +36,10 @@ interface ModelSelectorProps {
   placement?: "up" | "auto";
   /** The model new sessions start with; its row gets a filled star. */
   defaultValue?: { provider: string; modelId: string } | null;
-  /** Saves a model as the default for new sessions and selects it here. With
-   * `defaultPreferenceScope`, the star opens a global/project menu instead of
-   * saving directly. */
-  onSetDefault?: (provider: string, modelId: string, scope: "global" | "project") => void;
-  /** Where the saved default model comes from; only the `model` part matters
-   * here. Given, the star's save becomes a global/project choice. */
-  defaultPreferenceScope?: { model: "none" | "global" | "project" };
+  /** Shows a star on every row that saves it as the default. */
+  onSetDefault?: (provider: string, modelId: string) => void;
   /** Every available model, once loaded; listed under "all". */
   allOptions?: ModelSelectorOption[] | null;
-  /** Removes this project's own default model, so the global one applies again. */
-  onClearProjectDefault?: () => void;
   /** Set only while `enabledModels` narrows `options`: shows pi's `/model` "scoped | all" row and loads `allOptions`. */
   onShowAll?: () => void;
 }
@@ -101,10 +94,8 @@ export function ModelSelector({
   placement = "up",
   defaultValue,
   onSetDefault,
-  defaultPreferenceScope,
   allOptions,
   onShowAll,
-  onClearProjectDefault,
 }: ModelSelectorProps) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
@@ -226,10 +217,10 @@ export function ModelSelector({
     else onReselect?.(option.provider, option.modelId);
   };
 
-  const saveDefault = (option: ModelSelectorOption, scope: "global" | "project") => {
+  const saveDefault = (option: ModelSelectorOption) => {
     setOpen(false);
     setFilter("");
-    onSetDefault?.(option.provider, option.modelId, scope);
+    onSetDefault?.(option.provider, option.modelId);
   };
 
   return (
@@ -435,31 +426,7 @@ export function ModelSelector({
                           isDefault: option.modelId === defaultValue?.modelId && option.provider === defaultValue?.provider,
                           saveLabel: t("chat.saveDefaultModel"),
                           defaultLabel: t("chat.defaultModel"),
-                          onSave: () => saveDefault(option, "global"),
-                          ...(defaultPreferenceScope ? {
-                            choices: [
-                              // A project's own settings shadow the global file, so
-                              // a global save cannot take effect here: PUT refuses
-                              // it, and the row stays disabled instead of a 409.
-                              ...(defaultPreferenceScope.model === "project" ? [{
-                                key: "global",
-                                label: t("chat.saveDefaultGlobal"),
-                                disabled: true,
-                                disabledNote: t("chat.defaultShadowedByProject"),
-                                onPick: () => {},
-                              }] : [{
-                                key: "global",
-                                label: t("chat.saveDefaultGlobal"),
-                                onPick: () => saveDefault(option, "global"),
-                              }]),
-                              { key: "project", label: t("chat.saveDefaultProject"), onPick: () => saveDefault(option, "project") },
-                            ],
-                          } : {}),
-                          ...(defaultPreferenceScope?.model === "project" ? {
-                            defaultChoices: [
-                              { key: "follow-global", label: t("chat.followGlobalDefault"), onPick: () => { setOpen(false); setFilter(""); onClearProjectDefault?.(); } },
-                            ],
-                          } : {}),
+                          onSave: () => saveDefault(option),
                         } : undefined}
                       >
                         <OptionLabel label={option.name} />

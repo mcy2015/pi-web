@@ -97,7 +97,7 @@ app/api/
   cache-miss-notices/route.ts      GET/PUT pi's global showCacheMissNotices (Settings › General)
   models/route.ts                  GET ?cwd= { models, modelList, defaultModel, … }
   models/enabled/route.ts          GET/PUT enabledModels switches
-  models/default/route.ts          PUT default model / reasoning level for new sessions (global, or `scope:"project"` to the project's `.pi/settings.json` with `clear` to remove project defaults)
+  models/default/route.ts          PUT default model / reasoning level for new sessions
   models/refresh/route.ts          POST fetch provider catalogs from pi.dev on demand
   models-config/route.ts           GET/PUT ~/.pi/agent/models.json
   models-config/catalog/route.ts   GET models.dev pricing presets
