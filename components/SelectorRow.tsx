@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
 function StarIcon({ filled, size }: { filled: boolean; size: number }) {
@@ -37,28 +38,49 @@ export interface SelectorRowStar {
 
 /**
  * The star's scope menu: fixed-position, because neither the composer's
- * `overflow: hidden` nor a scrolling selector panel may clip it (the same
- * pattern as ModelSelector's panel). Purely presentational — opening,
- * closing, and positioning are SelectorRow's. Exported for tests.
+ * `overflow: hidden` nor a scrolling selector panel may clip it. Rendered
+ * through a portal to `document.body` (SelectorRow's choice): the model
+ * selector's panel carries `transform: translateY(-100%)` to open upward,
+ * and a transformed ancestor is the containing block of `fixed` descendants
+ * (CSS transforms spec), so in-panel fixed coordinates land relative to the
+ * panel, off-screen. Purely presentational — opening, closing, and
+ * positioning are SelectorRow's. Exported for tests.
  */
 export function SelectorRowStarMenu({
   anchorRect,
   label,
   choices,
   onPick,
+  menuRef,
+  onClose,
 }: {
   /** The star button's rect, read when the menu opened. */
   anchorRect: { top: number; right: number; bottom: number };
   label: string;
   choices: SelectorRowStarChoice[];
   onPick: (choice: SelectorRowStarChoice) => void;
+  /** The portal-mounted menu's root, so SelectorRow's outside-press check covers it. */
+  menuRef?: RefObject<HTMLDivElement | null>;
+  /** Closes the menu; Escape in the portal subtree reaches this, not SelectorRow's root. */
+  onClose?: () => void;
 }) {
   const openAbove = anchorRect.bottom + 96 > (typeof window === "undefined" ? Number.POSITIVE_INFINITY : window.innerHeight);
   const rightOffset = typeof window === "undefined" ? 8 : Math.max(8, window.innerWidth - anchorRect.right);
   return (
     <div
+      ref={menuRef}
       role="menu"
       aria-label={label}
+      // A press in this portal subtree belongs to the star menu, not to any
+      // outside-press logic up the tree (the selector panel would otherwise
+      // unmount the row mid-press and swallow the click that follows).
+      onMouseDown={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || !onClose) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      }}
       style={{
         position: "fixed",
         ...(openAbove
@@ -155,18 +177,20 @@ export function SelectorRow({
   const [focused, setFocused] = useState(false);
   const [starMenuRect, setStarMenuRect] = useState<{ top: number; right: number; bottom: number } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const starMenuRef = useRef<HTMLDivElement>(null);
   const canSave = Boolean(star && !star.isDefault);
   const hasChoices = canSave && Boolean(star?.choices?.length);
   const hasDefaultChoices = Boolean(star?.isDefault && star.defaultChoices?.length);
   const starMenuOpen = starMenuRect !== null;
   const showSave = canSave && (hovered || focused || isMobile || starMenuOpen);
 
-  // The star menu closes on any press outside its row (the menu itself is a
-  // DOM child of it), like the selectors' own panels.
+  // The star menu closes on any press outside its row or the menu itself;
+  // the menu is a portal child of body, so it is checked through its own ref.
   useEffect(() => {
     if (!starMenuOpen) return;
     const handleOutsidePress = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setStarMenuRect(null);
+      const target = event.target as Node;
+      if (!rootRef.current?.contains(target) && !starMenuRef.current?.contains(target)) setStarMenuRect(null);
     };
     document.addEventListener("mousedown", handleOutsidePress);
     return () => document.removeEventListener("mousedown", handleOutsidePress);
@@ -180,6 +204,22 @@ export function SelectorRow({
     setStarMenuRect(null);
     choice.onPick();
   };
+  // Portal-mounted (body, not the row): the selector panel's own fixed
+  // positioning comes with a transform, which would otherwise re-anchor this
+  // menu's fixed coordinates to the panel and off-screen.
+  const renderStarMenu = (choices: SelectorRowStarChoice[], label: string, rect: { top: number; right: number; bottom: number }) => (
+    typeof document === "undefined" ? null : createPortal(
+      <SelectorRowStarMenu
+        anchorRect={rect}
+        label={label}
+        choices={choices}
+        onPick={pickStarChoice}
+        menuRef={starMenuRef}
+        onClose={() => setStarMenuRect(null)}
+      />,
+      document.body,
+    )
+  );
 
   return (
     <div
@@ -190,8 +230,8 @@ export function SelectorRow({
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false);
       }}
-      // The star menu's Escape stops here, so the menu it closes is its own —
-      // not the selector panel the row sits in.
+      // Escape while focus sits in this row closes the star menu (focus in
+      // the portal-mounted menu closes it there, stopping before this root).
       onKeyDown={(event) => {
         if (event.key !== "Escape" || !starMenuOpen) return;
         event.preventDefault();
@@ -308,12 +348,8 @@ export function SelectorRow({
           <StarIcon filled={false} size={12} />
         </button>
       )}
-      {starMenuOpen && star?.choices && starMenuRect && (
-        <SelectorRowStarMenu anchorRect={starMenuRect} label={star.saveLabel} choices={star.choices} onPick={pickStarChoice} />
-      )}
-      {starMenuOpen && star?.defaultChoices && starMenuRect && (
-        <SelectorRowStarMenu anchorRect={starMenuRect} label={star.defaultLabel} choices={star.defaultChoices} onPick={pickStarChoice} />
-      )}
+      {starMenuOpen && star?.choices && starMenuRect && renderStarMenu(star.choices, star.saveLabel, starMenuRect)}
+      {starMenuOpen && star?.defaultChoices && starMenuRect && renderStarMenu(star.defaultChoices, star.defaultLabel, starMenuRect)}
     </div>
   );
 }
