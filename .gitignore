@@ -45,3 +45,6 @@ yarn-error.log*
 next-env.d.ts
 .factory
 e2e_*.mjs
+
+# playwright mcp session artifacts (console logs, page snapshots)
+.playwright-mcp/
