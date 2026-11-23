@@ -79,8 +79,9 @@ interface Props {
   modelSwitching?: boolean;
   /** The model new sessions start with, starred in the model selector. */
   defaultModel?: { provider: string; modelId: string } | null;
-  /** Saves a model as the default for new sessions and selects it here. */
-  onSetDefaultModel?: (provider: string, modelId: string) => void;
+  /** Saves a model as the default for new sessions and selects it here. With
+   * `defaultPreferenceScope`, the star picks the scope from a menu. */
+  onSetDefaultModel?: (provider: string, modelId: string, scope: "global" | "project") => void;
   onCompact?: () => void;
   onAbortCompaction?: () => void;
   isCompacting?: boolean;
@@ -104,8 +105,14 @@ interface Props {
   thinkingLevelMap?: Record<string, string | null> | null;
   /** `defaultThinkingLevel` saved in settings, starred in the reasoning menu. */
   savedDefaultThinkingLevel?: string | null;
-  /** Saves a reasoning level as the default for new sessions and selects it here. */
-  onSetDefaultThinkingLevel?: (level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max") => void;
+  /** Saves a reasoning level as the default for new sessions and selects it here. With
+   * `defaultPreferenceScope`, the star picks the scope from a menu. */
+  onSetDefaultThinkingLevel?: (level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", scope: "global" | "project") => void;
+  /** Where the saved defaults come from; the stars' menus come with it. Without
+   * a `cwd` there is no project to save to, so the stars stay single-click. */
+  defaultPreferenceScope?: { model: "none" | "global" | "project"; thinkingLevel: "none" | "global" | "project" };
+  /** Removes this project's own default, so the global one applies again. */
+  onClearProjectDefault?: (kind: "model" | "thinkingLevel") => void;
   retryInfo?: { attempt: number; maxAttempts: number; errorMessage?: string } | null;
   queuedMessages?: QueuedMessages | null;
   inputHistory?: string[];
@@ -865,6 +872,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   onCompact, onAbortCompaction, isCompacting, compactError, onDismissCompactError, compactResult, toolPreset, onToolPresetChange, newSessionEphemeral, onNewSessionEphemeralChange, liveSessionEphemeral, onEndEphemeralSession,
   thinkingLevel, isAutoThinkingSelection = false, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
   savedDefaultThinkingLevel, onSetDefaultThinkingLevel,
+  defaultPreferenceScope, onClearProjectDefault,
   retryInfo, queuedMessages, inputHistory = [], onRecallQueue,
   slashCommands, slashCommandsLoading, onLoadSlashCommands,
   extensionUiOpen = false,
@@ -2012,6 +2020,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     ? `${compactResult.reason && compactResult.reason !== "manual" ? `${compactResult.reason[0].toUpperCase()}${compactResult.reason.slice(1)} ` : t("chat.compacted")} ${formatTokenCount(compactResult.tokensBefore)} -> ${formatTokenCount(compactResult.estimatedTokensAfter)} tokens (${t("chat.tokensSaved", { saved: formatTokenCount(compactSavedTokens) })})`
     : null;
   const resolvedThinkingLevel = thinkingLevel && thinkingLevel !== "auto" ? thinkingLevel : null;
+  // Without a cwd there is no project to save to, so the star stays single-click.
+  const thinkingDefaultScope = cwd ? defaultPreferenceScope?.thinkingLevel ?? "none" : undefined;
   const thinkingDisplayLabel = (() => {
     const lvl = resolvedThinkingLevel ?? "auto";
     if (lvl === "auto" || !thinkingLevelMap) return lvl;
@@ -2867,6 +2877,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 isAutoSelection={isAutoModelSelection}
                 defaultValue={defaultModel}
                 onSetDefault={onSetDefaultModel}
+                defaultPreferenceScope={cwd ? { model: defaultPreferenceScope?.model ?? "none" } : undefined}
+                onClearProjectDefault={onClearProjectDefault ? () => onClearProjectDefault("model") : undefined}
                 allOptions={allModelList?.map((m) => ({ provider: m.provider, providerName: m.providerName, modelId: m.id, name: m.name }))}
                 onShowAll={onLoadAllModels}
               />
@@ -3120,8 +3132,45 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                                 defaultLabel: t("chat.defaultThinking"),
                                 onSave: () => {
                                   setThinkingDropdownOpen(false);
-                                  onSetDefaultThinkingLevel(lvl);
+                                  onSetDefaultThinkingLevel(lvl, "global");
                                 },
+                                ...(thinkingDefaultScope ? {
+                                  choices: [
+                                    // A project's own settings shadow the global file, so a global
+                                    // save cannot take effect here: PUT refuses it, and the row stays
+                                    // disabled instead of a 409.
+                                    ...(thinkingDefaultScope === "project" ? [{
+                                      key: "global",
+                                      label: t("chat.saveDefaultGlobal"),
+                                      disabled: true,
+                                      disabledNote: t("chat.defaultShadowedByProject"),
+                                      onPick: () => {},
+                                    }] : [{
+                                      key: "global",
+                                      label: t("chat.saveDefaultGlobal"),
+                                      onPick: () => {
+                                        setThinkingDropdownOpen(false);
+                                        onSetDefaultThinkingLevel(lvl, "global");
+                                      },
+                                    }]),
+                                    {
+                                      key: "project",
+                                      label: t("chat.saveDefaultProject"),
+                                      onPick: () => {
+                                        setThinkingDropdownOpen(false);
+                                        onSetDefaultThinkingLevel(lvl, "project");
+                                      },
+                                    },
+                                  ],
+                                } : {}),
+                                ...(thinkingDefaultScope === "project" ? {
+                                  defaultChoices: [
+                                    { key: "follow-global", label: t("chat.followGlobalDefault"), onPick: () => {
+                                      setThinkingDropdownOpen(false);
+                                      onClearProjectDefault?.("thinkingLevel");
+                                    } },
+                                  ],
+                                } : {}),
                               }
                             : undefined}
                         >

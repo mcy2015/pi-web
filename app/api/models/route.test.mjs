@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
 import { promisify } from "node:util";
+import { ProjectTrustStore } from "@earendil-works/pi-coding-agent";
 import { createJiti } from "jiti";
 
 const execFileAsync = promisify(execFile);
@@ -163,6 +164,64 @@ test("honors ?scope=all on demand and reports isScoped accurately", async () => 
     assert.deepEqual(scopedAgain.body.modelList.map((m) => `${m.provider}:${m.id}`), ["acme:one"]);
   } finally {
     await rm(join(agentDir, "settings.json"), { force: true });
+    invalidateModelsCache();
+  }
+});
+
+test("defaultPreferenceScope says where each saved default comes from", async () => {
+  const project = join(root, "scoped-project");
+  const shadowed = join(root, "untrusted-project");
+  allowFileRoot(project);
+  allowFileRoot(shadowed);
+  const store = new ProjectTrustStore(agentDir);
+
+  try {
+    // No default anywhere.
+    await mkdir(project, { recursive: true });
+    await mkdir(join(shadowed, ".pi"), { recursive: true });
+    invalidateModelsCache();
+    const none = await models(project);
+    assert.equal(none.status, 200);
+    assert.deepEqual(none.body.defaultPreferenceScope, { model: "none", thinkingLevel: "none" });
+
+    // A global default, which the untrusted folder's file must not hide.
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({
+      defaultProvider: "acme",
+      defaultModel: "one",
+    }, null, 2));
+    // The same default model, plus a thinking level only the project file has:
+    // if an untrusted folder's file were loaded, the level would surface.
+    await writeFile(join(shadowed, ".pi", "settings.json"), JSON.stringify({
+      defaultProvider: "acme",
+      defaultModel: "one",
+      defaultThinkingLevel: "high",
+    }, null, 2));
+    invalidateModelsCache();
+
+    const global = await models(shadowed);
+    assert.equal(global.status, 200);
+    assert.deepEqual(global.body.defaultModel, { provider: "acme", modelId: "one" });
+    assert.equal(global.body.defaultThinkingLevel, null, "the untrusted project file is not loaded, so its thinking default hides nothing");
+    assert.equal(global.body.savedDefaultThinkingLevel, null);
+    assert.deepEqual(global.body.defaultPreferenceScope, { model: "global", thinkingLevel: "none" });
+
+    // A trusted project's file wins over the global one.
+    await mkdir(join(project, ".pi"), { recursive: true });
+    await writeFile(join(project, ".pi", "settings.json"), JSON.stringify({
+      defaultThinkingLevel: "low",
+    }, null, 2));
+    store.set(project, true);
+    invalidateModelsCache();
+
+    const fromProject = await models(project);
+    assert.equal(fromProject.status, 200);
+    assert.deepEqual(fromProject.body.defaultPreferenceScope, { model: "global", thinkingLevel: "project" });
+    assert.equal(fromProject.body.defaultThinkingLevel, "low");
+    assert.equal(fromProject.body.savedDefaultThinkingLevel, "low", "the star is lit by the saved project value");
+  } finally {
+    store.set(project, null);
+    await rm(join(agentDir, "settings.json"), { force: true });
+    await rm(join(agentDir, "trust.json"), { force: true });
     invalidateModelsCache();
   }
 });

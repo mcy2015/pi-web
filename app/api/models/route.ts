@@ -12,6 +12,7 @@ import {
 import { orderSelectorModels, resolveVisibleModels, selectInitialModelScope } from "@/lib/model-scope";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
 import { projectTrustReloadOptions } from "@/lib/project-trust";
+import { createEnabledModelsSettingsManager } from "@/lib/enabled-models-runtime";
 import { llamaCppExtension } from "@/lib/pi-sdk-internals";
 import { providerDisplayNames, rememberProviderModels, withDeferredProviderModels } from "@/lib/deferred-provider-models";
 import { inferRemovedWorktree } from "@/lib/worktree";
@@ -34,6 +35,10 @@ async function loadModels(cwd: string, scopeAll = false): Promise<ModelsData> {
   const services = await createAgentSessionServices({
     cwd,
     agentDir,
+    // Trust-aware, as session startup builds it (lib/rpc-manager.ts): an
+    // untrusted project's `.pi/settings.json` must not shadow the global
+    // defaults here, or the selectors would offer a default new chats ignore.
+    settingsManager: createEnabledModelsSettingsManager(cwd, agentDir),
     resourceLoaderOptions: { extensionFactories: [llamaCppExtension] },
     ...(trustReloadOptions ? { resourceLoaderReloadOptions: trustReloadOptions } : {}),
   });
@@ -81,6 +86,20 @@ async function loadModels(cwd: string, scopeAll = false): Promise<ModelsData> {
     ?? settings.getDefaultThinkingLevel()
     ?? null;
 
+  // Where the saved defaults come from, for the selectors' stars: a project
+  // value wins over the global one, and an untrusted project's file is not
+  // loaded at all (the settings manager above is trust-aware), so it hides
+  // nothing here.
+  const projectSettings = settings.getProjectSettings();
+  const defaultPreferenceScope = {
+    model: projectSettings.defaultProvider !== undefined || projectSettings.defaultModel !== undefined
+      ? "project" as const
+      : defaultProvider !== undefined && defaultModelId !== undefined ? "global" as const : "none" as const,
+    thinkingLevel: projectSettings.defaultThinkingLevel !== undefined
+      ? "project" as const
+      : settings.getDefaultThinkingLevel() !== undefined ? "global" as const : "none" as const,
+  };
+
   return withModelRuntimeError(
     {
       models: Object.fromEntries(nameMap),
@@ -88,6 +107,7 @@ async function loadModels(cwd: string, scopeAll = false): Promise<ModelsData> {
       defaultModel,
       defaultThinkingLevel,
       savedDefaultThinkingLevel: settings.getDefaultThinkingLevel() ?? null,
+      defaultPreferenceScope,
       thinkingLevels,
       thinkingLevelMaps,
       thinkingLevelPins,
@@ -104,6 +124,7 @@ const EMPTY_MODELS: ModelsData = {
   defaultModel: null,
   defaultThinkingLevel: null,
   savedDefaultThinkingLevel: null,
+  defaultPreferenceScope: { model: "none", thinkingLevel: "none" },
   thinkingLevels: {},
   thinkingLevelMaps: {},
   thinkingLevelPins: {},
