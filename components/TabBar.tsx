@@ -17,7 +17,7 @@ export interface Tab {
   initialDisplayMode?: FileViewerDisplayMode;
   /** PDF page requested by the link that opened this tab (`#page=N`). */
   page?: number;
-  /** Source lines requested by the link that opened this tab (`#L12-L15`, `path:12`). */
+  /** Lines requested by the link that opened this tab (`:42`, `:10-20`); dropped once its viewer reports. */
   lines?: FileLineRange;
   viewerState?: FileViewerState;
   viewerRevision?: number;

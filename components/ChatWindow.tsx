@@ -1,10 +1,10 @@
 "use client";
 import { registerAbortHandler } from "@/hooks/useKeyboardShortcuts";
 import { isHiddenRelation, SIDE_BOUNDARY_MESSAGE_TYPE } from "@/lib/session-family";
-import type { OpenFileHandler } from "@/lib/file-links";
 import Image from "next/image";
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecutionMessage, BlockingExtensionUiRequest, ExtensionUiRequest, SessionInfo, SessionTreeNode, ToolResultMessage, UserMessage } from "@/lib/types";
+import type { FileLinkTarget } from "@/lib/file-links";
 import { normalizeCustomPanelLines, stripAnsi } from "@/lib/ansi";
 import { splitNoticeLinks, splitNoticeText } from "@/lib/notice-text";
 import { EXTENSION_DIALOG_BASE_WIDTH, fitExtensionDialogWidth } from "@/lib/extension-dialog-fit";
@@ -16,6 +16,7 @@ import { collectSubagentSources } from "@/lib/subagent-written-files";
 import { getFinalAnswerViews, keepWrittenFiles, type FinalAnswerViews } from "@/lib/turn-views";
 import { formatTurnDuration, getTurnDurationMs } from "@/lib/turn-duration";
 import { dropMentionText, splitDroppedItems, uploadFiles, type DroppedItem } from "@/lib/file-upload-client";
+import type { SessionReferenceTarget } from "@/lib/session-reference-target";
 import { MessageView } from "./MessageView";
 import { MarkdownBody } from "./MarkdownBody";
 import { ChatInput, getUserMessageDraftImages, getUserMessageText, type ChatInputHandle } from "./ChatInput";
@@ -54,6 +55,7 @@ import {
   restoreScrollTop,
   VISIBLE_PAGE_SIZE,
 } from "@/lib/chat-lazy-load";
+import { errorMessage } from "@/lib/errors";
 
 interface Props {
   session: SessionInfo | null;
@@ -92,7 +94,7 @@ interface Props {
   /** Opens Settings on a section: a bare `/mcp` that pi's built-in MCP extension owns opens Settings › MCP. */
   onOpenSettings?: (section: SettingsSection) => void;
   onContextUsageChange?: (usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => void;
-  onOpenFile?: OpenFileHandler;
+  onOpenFile?: (filePath: string, target?: FileLinkTarget) => void;
   /** Opens the working tree's full change list (the written-file chips' tail). */
   onOpenAllChanges?: () => void;
   /** Files dropped onto the chat were written into the working directory. */
@@ -388,7 +390,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     try {
       refusal = await startSideChat(message);
     } catch (error) {
-      refusal = error instanceof Error ? error.message : String(error);
+      refusal = errorMessage(error);
     }
     if (!refusal) return;
     chatInputRef?.current?.restoreSubmission(message);
@@ -724,11 +726,17 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         addNotice({ type: "error", message: t("chat.dropFailed", { message: `${failure.name}: ${failure.error}` }) });
       }
     } catch (uploadError) {
-      addNotice({ type: "error", message: t("chat.dropFailed", { message: uploadError instanceof Error ? uploadError.message : String(uploadError) }) });
+      addNotice({ type: "error", message: t("chat.dropFailed", { message: errorMessage(uploadError) }) });
     }
   }, [addNotice, chatInputRef, newSessionCwd, onFilesUploaded, session?.cwd, t]);
 
-  const onDrop = useCallback((items: DroppedItem[]) => {
+  const onDrop = useCallback((items: DroppedItem[], session?: SessionReferenceTarget) => {
+    // A dragged session row quotes it: it joins the composer as a chip and its
+    // token is written when the message is sent (#1716).
+    if (session) {
+      chatInputRef?.current?.addSessionReference(session);
+      return;
+    }
     const { images, files, folders } = splitDroppedItems(items);
     if (images.length > 0) chatInputRef?.current?.addImages(images);
     if (folders.length > 0) {
@@ -1013,24 +1021,27 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         </div>
       )}
 
-      <div
-        style={{
-          position: "absolute",
-          top: 12,
-          left: 0,
-          right: isMobile ? 0 : CHAT_MINIMAP_WIDTH,
-          zIndex: 40,
-          display: "flex",
-          // Toasts live in the top-right corner
-          justifyContent: "flex-end",
-          padding: `0 ${CHAT_COLUMN_PADDING}px`,
-          pointerEvents: "none",
-        }}
-      >
-        <NoticeShelf notices={notices} floating onPauseChange={setNoticePaused} />
-      </div>
-
       <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+        {/* Inside the transcript's box, not the whole column: the shelf ends
+            above the composer and scrolls there instead of covering it (#1780). */}
+        <div
+          style={{
+            position: "absolute",
+            top: 12,
+            bottom: 12,
+            left: 0,
+            right: isMobile ? 0 : CHAT_MINIMAP_WIDTH,
+            zIndex: 40,
+            display: "flex",
+            // Toasts live in the top-right corner
+            justifyContent: "flex-end",
+            alignItems: "flex-start",
+            padding: `0 ${CHAT_COLUMN_PADDING}px`,
+            pointerEvents: "none",
+          }}
+        >
+          <NoticeShelf notices={notices} floating onPauseChange={setNoticePaused} />
+        </div>
         {extensionDialog && (
           <ExtensionDialog key={extensionDialog.id} request={extensionDialog} waitingCount={waitingExtensionDialogCount} onRespond={respondToExtensionUi} />
         )}
@@ -1079,7 +1090,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 const msg = options.messageOverride ?? messages[idx];
                 if (msg.role === "custom" && msg.customType === SIDE_BOUNDARY_MESSAGE_TYPE) return <SideChatDivider key="side-chat-divider" />;
                 if (isHiddenCustomMessage(msg)) return null;
-                // pi's showCacheMissNotices (#1265): read from the stored message, not a turn view's copy.
+                // pi's notices.* (#1265): read from the stored message, not a turn view's copy.
                 const notices = options.withNotices === false ? [] : getTranscriptNotices(messages[idx]);
                 const isVisible = hasTurnRef(msg, turnAnchors[idx]);
                 const currentRefIdx = visibleRefIndexByMessage.get(idx);
@@ -1295,7 +1306,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                        {t("chat.loadEarlier")}
                     </div>
                   )}
-                  <div ref={attachTranscriptRows}>{rendered.slice(startIndex)}</div>
+                  <div ref={attachTranscriptRows} className="transcript-rows">{rendered.slice(startIndex)}</div>
                 </>
               );
             })()}
@@ -1455,7 +1466,8 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
 function SideChatDivider() {
   const { t } = useI18n();
   return (
-    <div role="separator" className="my-4 flex items-center gap-3 text-xs" style={{ color: "var(--text-dim)" }}>
+    // Bottom margin only: the row above keeps its own gap (useSkipOffscreenRows).
+    <div role="separator" className="mb-4 flex items-center gap-3 text-xs" style={{ color: "var(--text-dim)" }}>
       <span className="h-px flex-1" style={{ background: "var(--border)" }} />
       <span>{t("sideChat.divider")}</span>
       <span className="h-px flex-1" style={{ background: "var(--border)" }} />
@@ -1470,7 +1482,7 @@ const StreamingReply = memo(function StreamingReply({ store, onCommit, toolResul
   toolResults: Map<string, ToolResultMessage>;
   modelNames: Record<string, string>;
   cwd?: string;
-  onOpenFile?: OpenFileHandler;
+  onOpenFile?: (filePath: string, target?: FileLinkTarget) => void;
   onOpenSubagent?: (sessionId: string, label: string) => void;
   onEnterSubagent?: (sessionId: string, label: string) => void;
 }) {
@@ -1503,6 +1515,19 @@ function NoticeShelf({ notices, floating = false, onPauseChange }: { notices: No
         // Right-anchored: every toast's right edge aligns here, widths extend leftward
         alignItems: "flex-end",
         marginBottom: floating ? 0 : 10,
+        // Never taller than the box it floats in, the transcript's above the
+        // composer: a stack that does not fit scrolls there (#1780). The scroll
+        // box clips, so its padding keeps the cards' shadows inside it.
+        ...(floating ? {
+          maxHeight: "100%",
+          overflowY: "auto",
+          overscrollBehavior: "contain",
+          scrollbarWidth: "thin",
+          padding: "4px 12px 24px",
+          marginTop: -4,
+          marginLeft: -12,
+          marginRight: -12,
+        } as const : {}),
       }}
     >
       {notices.map((notice, index) => {
@@ -1539,6 +1564,8 @@ function NoticeShelf({ notices, floating = false, onPauseChange }: { notices: No
               // so the toast itself must opt back into interactivity or hover events never reach it
               pointerEvents: "auto",
               marginBottom: index === notices.length - 1 ? 0 : 6,
+              // Each card keeps its height; the shelf scrolls instead of squeezing them
+              flexShrink: 0,
               overflow: "hidden",
               borderRadius: 14,
               border: "1px solid color-mix(in srgb, var(--border) 70%, transparent)",

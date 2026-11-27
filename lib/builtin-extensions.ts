@@ -18,6 +18,7 @@ import { createPiWebMcpTransportFactory } from "./mcp-transport";
 import { loadPiSdkInternals, type PiSdkInternals, type PiSdkInternalsResult } from "./pi-sdk-internals";
 import { mayReadProjectConfigNow } from "./project-trust";
 import { PROJECT_SETTINGS_MAX_BYTES, readRegularFileText } from "./regular-file";
+import { errorMessage } from "./errors";
 import { createTodoExtension } from "./todo-extension";
 
 // The built-in extensions the pi CLI prepends from a module the SDK does not
@@ -40,10 +41,6 @@ export type BuiltinFeatureStatus = { available: true } | { available: false; rea
 export function isMcpDisabledByOperator(environment: NodeJS.ProcessEnv = process.env): boolean {
   const value = environment[MCP_DISABLE_VARIABLE]?.trim().toLowerCase();
   return value !== undefined && value !== "" && value !== "0" && value !== "false";
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 // ---------------------------------------------------------------------------
