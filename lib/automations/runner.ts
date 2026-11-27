@@ -4,9 +4,10 @@
 // isolated pi session (named "task · time"), sends the prompt, waits for the
 // turn's prompt_done — the lesson the Telegram channel paid for — records the
 // run, pushes a browser notification, and announces the outcome (with the
-// full final reply) to the automation's notify channels. A run is skipped
-// when the same automation is still running (OpenClaw's policy); time missed
-// while the server was down is not made up: nextDueAt is recomputed from now.
+// full final reply) to the automation's notify channels, and archives the
+// run's session when the automation asks for that. A run is skipped when the
+// same automation is still running (OpenClaw's policy); time missed while the
+// server was down is not made up: nextDueAt is recomputed from now.
 
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -17,6 +18,7 @@ import { invalidateSessionListCache } from "@/lib/session-reader";
 import { editAutomations, isSilentReply, readAutomations, type AutomationModel, type AutomationRun } from "./store";
 import { nextDueTime, scheduleProblem } from "./cron-schedule";
 import { pushRunOutcome } from "./notify";
+import { archiveAutomationSession } from "./archive";
 import { agentMessageText } from "../telegram/message-text";
 
 const TICK_MS = 30_000;
@@ -110,6 +112,14 @@ async function finishRun(runId: string, patch: Partial<Pick<AutomationRun, "fini
     },
     changed: true,
   })).catch(() => {});
+}
+
+/** The run's session leaves the sidebar's main list once the run has settled,
+ *  when the automation asks: after prompt_done, since the sidebar lists a
+ *  family as archived only while nothing of it runs. */
+async function archiveRunSession(automation: AutomationModel, sessionId: string | null): Promise<void> {
+  if (!automation.archiveSession || sessionId === null) return;
+  await archiveAutomationSession(sessionId);
 }
 
 function runStamp(now = new Date()): string {
@@ -215,6 +225,7 @@ export async function fireAutomation(
       sessionFile: wrapper.sessionFile,
       error: aborted ? "The turn was stopped" : null,
     });
+    await archiveRunSession(automation, sessionId);
     invalidateSessionListCache();
     // A successful reply that hits the automation's silence keywords notifies
     // no one; a failed or stopped run always does.
@@ -243,6 +254,7 @@ export async function fireAutomation(
       sessionFile: wrapper.sessionFile,
       error: message,
     });
+    await archiveRunSession(automation, sessionId);
     invalidateSessionListCache();
     if (automation.notify) {
       await notifySessionComplete(sessionId, `${name} · failed`).catch(() => {});

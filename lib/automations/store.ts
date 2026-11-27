@@ -67,6 +67,10 @@ export interface AutomationModel {
    *  contains any of them notifies no one — neither the browser push nor the
    *  channels. "" always notifies; failures notify regardless. */
   silentWhen: string;
+  /** Archive the session a run leaves behind once it ends (the sidebar's own
+ *  archive, `lib/session-ui-state.ts`), so a task's sessions stay out of the
+ *  main list; the run's outcome stays in the history. Off keeps them listed. */
+  archiveSession: boolean;
   /** The scheduler's cache: when this automation is next due. */
   nextDueAt: number | null;
   lastRunAt: number | null;
@@ -220,6 +224,7 @@ function parseAutomation(raw: unknown): AutomationModel | null {
     notify: record.notify !== false,
     notifyChannels: parseNotifyChannels(record.notifyChannels),
     silentWhen: typeof record.silentWhen === "string" ? record.silentWhen : "",
+    archiveSession: record.archiveSession === true,
     nextDueAt: typeof record.nextDueAt === "number" ? record.nextDueAt : null,
     lastRunAt: typeof record.lastRunAt === "number" ? record.lastRunAt : null,
     createdAt: typeof record.createdAt === "number" ? record.createdAt : 0,

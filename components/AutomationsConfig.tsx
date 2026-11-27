@@ -4,8 +4,9 @@
 // automations (MCP-style rows: a state dot, the name, the next run), the
 // detail pane edits the selected one or drafts a new one — schedule editor
 // (cron / one-shot / interval) with a live next-run preview, the working
-// directory, the prompt, notification and enable switches — plus the recent
-// runs, each linking into the session it produced.
+// directory, the prompt, the notification and session-archive switches and
+// the enable switch — plus the recent runs, each linking into the session
+// it produced.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
@@ -65,6 +66,7 @@ interface Draft {
   notify: boolean;
   notifyChannels: NotifyChannelDraft[];
   silentWhen: string;
+  archiveSession: boolean;
 }
 
 const EVERY_UNIT_MS: Record<Draft["everyUnit"], number> = {
@@ -109,6 +111,7 @@ function draftFrom(automation: AutomationModel | null): Draft {
       notify: true,
       notifyChannels: [],
       silentWhen: "",
+      archiveSession: false,
     };
   }
   const schedule = automation.schedule;
@@ -129,6 +132,7 @@ function draftFrom(automation: AutomationModel | null): Draft {
     notifyChannels: automation.notifyChannels.flatMap((target): NotifyChannelDraft[] =>
       target.type === "telegram" && Number.isInteger(target.chatId) ? [{ type: "telegram", chatId: target.chatId }] : []),
     silentWhen: automation.silentWhen,
+    archiveSession: automation.archiveSession,
   };
 }
 
@@ -474,6 +478,20 @@ export function AutomationsConfig({ embedded = true, onClose }: { embedded?: boo
                       <div className="automations-notify-hint">{t("automations.notifySilentHint")}</div>
                     </div>
                   </ConfigDetailGridRow>
+                  <ConfigDetailGridRow label={t("automations.sessionLabel")}>
+                    <div className="automations-notify">
+                      <div className="automations-notify-row">
+                        <ConfigSwitch
+                          checked={draft.archiveSession}
+                          label={t("automations.archiveSession")}
+                          describedBy="automations-archive-session-hint"
+                          onChange={(archiveSession) => setDraft((current) => ({ ...current, archiveSession }))}
+                        />
+                        <span>{t("automations.archiveSession")}</span>
+                      </div>
+                      <div id="automations-archive-session-hint" className="automations-notify-hint">{t("automations.archiveSessionHint")}</div>
+                    </div>
+                  </ConfigDetailGridRow>
                 </ConfigDetailGrid>
 
                 <ConfigField label={t("automations.promptLabel")}>
@@ -503,6 +521,7 @@ export function AutomationsConfig({ embedded = true, onClose }: { embedded?: boo
                         notify: draft.notify,
                         notifyChannels: draft.notifyChannels,
                         silentWhen: draft.silentWhen.trim(),
+                        archiveSession: draft.archiveSession,
                       };
                       void run("save", body, editing ? t("automations.saved") : t("automations.created")).then((ok) => {
                         if (!ok) return;

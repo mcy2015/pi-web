@@ -126,6 +126,7 @@ export async function POST(req: NextRequest) {
           notify: body.notify !== false,
           notifyChannels: asNotifyChannels(body.notifyChannels),
           silentWhen: asSilentWhen(body.silentWhen),
+          archiveSession: body.archiveSession === true,
           nextDueAt: null,
           lastRunAt: null,
           createdAt: Date.now(),
@@ -151,6 +152,7 @@ export async function POST(req: NextRequest) {
           notify: body.notify !== false,
           notifyChannels: asNotifyChannels(body.notifyChannels),
           silentWhen: asSilentWhen(body.silentWhen),
+          archiveSession: body.archiveSession === true,
           ...(model && typeof model.provider === "string" && typeof model.modelId === "string"
             ? { model: { provider: model.provider, modelId: model.modelId } }
             : { model: null }),
