@@ -1682,3 +1682,12 @@ a.session-tree-main {
     animation: none;
   }
 }
+
+/* Fork: the chat's top bar carries a New of its own, reachable with the
+   sidebar open or closed, so the sidebar toolbar's own New is not shown. It
+   stays in the tree: this row's structure tests and its fit measurement
+   (useHeaderFit reads the row's real width) see the same row. Last in the
+   file, so it wins over the cells' shared `display: flex`. */
+.sidebar-new-button {
+  display: none;
+}
